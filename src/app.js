@@ -262,8 +262,13 @@ async function openNewDriverModal() {
 async function openNewDeliveryModal() {
   const { data: drivers = [] } = await supabase.from('delivery_drivers').select('user_id,full_name').eq('active',true).order('full_name');
   const options = ['<option value="">Aguardando entregador</option>'].concat(drivers.map(d => '<option value="' + d.user_id + '">' + escapeHtml(d.full_name) + '</option>')).join('');
-  const modal = openModal('Nova entrega', '<form id="delivery-form" class="stack-form"><div class="form-grid"><label>Código do pedido<input name="order_code" placeholder="Ex.: 1058"></label><label>Cliente<input name="customer_name" required placeholder="Nome do cliente"></label></div><label>Telefone<input name="customer_phone" placeholder="(17) 99999-9999"></label><label>Endereço completo<input name="address_text" required placeholder="Rua, número, bairro"></label><label>Entregador<select name="driver_id">' + options + '</select></label><label>Observação<textarea name="notes" rows="3" placeholder="Referência, troco, observação..."></textarea></label><button class="primary" type="submit">Adicionar à fila</button></form>');
+  const modal = openModal('Nova entrega', '<form id="delivery-form" class="stack-form"><div class="form-grid"><label>Código do pedido<input name="order_code" placeholder="Ex.: 1058"></label><label>Cliente<input name="customer_name" required placeholder="Nome do cliente"></label></div><label>Telefone<input name="customer_phone" placeholder="(17) 99999-9999"></label><label>Endereço completo<input name="address_text" required placeholder="Rua, número, bairro"></label><button class="secondary address-preview" type="button" id="preview-address">↗ Conferir endereço no Maps</button><label>Entregador<select name="driver_id">' + options + '</select></label><label>Observação<textarea name="notes" rows="3" placeholder="Referência, troco, observação..."></textarea></label><button class="primary" type="submit">Adicionar à fila</button></form>');
   const form = modal.querySelector('#delivery-form');
+  modal.querySelector('#preview-address')?.addEventListener('click', () => {
+    const address = String(form.elements.address_text.value || '').trim();
+    if (!address) return alert('Digite o endereço primeiro.');
+    window.open('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(address + ', São José do Rio Preto - SP'),'_blank','noopener');
+  });
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const button = form.querySelector('button[type="submit"]');
@@ -312,7 +317,7 @@ function renderSellerQueue(queue, drivers) {
     return;
   }
   holder.innerHTML = queue.map(item => {
-    const isClosed = ['entregue','cancelada'].includes(item.status);
+    const isClosed = ['entregue','cancelada','nao_entregue'].includes(item.status);
     const options = ['<option value="">Sem entregador</option>'].concat(drivers.map(d => '<option value="' + d.user_id + '"' + (item.driver_id === d.user_id ? ' selected' : '') + '>' + escapeHtml(d.full_name) + '</option>')).join('');
     const code = item.order_code ? '#' + escapeHtml(item.order_code) : 'Sem código';
     const driverSelect = isClosed
