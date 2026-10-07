@@ -156,7 +156,7 @@ function adminView() {
     <aside class="sidebar"><div class="side-brand"><div class="brand-mark small">DV</div><div><strong>Entregas</strong><span>Central operacional</span></div></div><nav><button class="active">${icon('map')} Mapa ao vivo</button><button>${icon('box')} Entregas</button><button>${icon('users')} Entregadores</button><button>${icon('clock')} Histórico</button></nav><div class="side-user"><span>${icon('admin')}</span><div><strong>${state.profile?.full_name || 'Administrador'}</strong><small>Administrador</small></div></div></aside>
     <main class="admin-main">
       ${topbar('Operação de hoje', 'Acompanhe entregadores, rotas e pedidos em um só lugar.')}
-      <section class="admin-actions"><button class="primary inline" id="new-delivery">+ Nova entrega</button><button class="secondary" id="new-driver">+ Novo entregador</button></section>
+      <section class="admin-actions"><button class="primary inline" id="new-delivery">+ Nova entrega</button><button class="secondary" id="new-driver">+ Novo usuário</button></section>
       <section class="metrics"><article><span>Entregadores ativos</span><strong id="admin-drivers">0</strong><small>cadastrados</small></article><article><span>Entregas totais</span><strong id="admin-total">0</strong><small>hoje</small></article><article><span>Concluídas</span><strong id="admin-completed">0</strong><small>hoje</small></article><article><span>Aguardando</span><strong id="admin-waiting">0</strong><small>sem conclusão</small></article></section>
       <section class="ops-grid"><div class="map-card admin-map"><div id="map"></div><div class="map-legend"><span><i class="green"></i>Em rota</span><span><i class="yellow"></i>Parado</span><span><i class="gray"></i>Offline</span></div></div><aside class="drivers-panel"><div class="panel-title"><div><p class="eyebrow">DESEMPENHO</p><h2>Entregadores</h2></div><span id="admin-driver-label">0 ativos</span></div><div id="admin-driver-stats"><p class="empty-state">Carregando...</p></div></aside></section>
       <section class="queue-panel"><div class="panel-title"><div><p class="eyebrow">FILA</p><h2>Entregas em aberto</h2></div><span id="queue-count">0</span></div><div id="admin-delivery-queue" class="queue-list"><p class="empty-state">Carregando fila...</p></div></section>
@@ -181,32 +181,38 @@ function openModal(title, bodyHtml) {
 }
 
 async function openNewDriverModal() {
-  const modal = openModal('Novo entregador', '<form id="driver-form" class="stack-form"><label>Nome completo<input name="full_name" required placeholder="Nome do entregador"></label><label>E-mail de acesso<input name="email" type="email" required placeholder="entregador@exemplo.com"></label><label>Telefone<input name="phone" placeholder="(17) 99999-9999"></label><label>Senha inicial<input name="password" type="password" minlength="8" required placeholder="Mínimo 8 caracteres"></label><button class="primary" type="submit">Criar entregador</button><p class="form-help">O entregador usará este e-mail e senha para entrar.</p></form>');
+  const modal = openModal('Novo usuário', '<form id="driver-form" class="stack-form"><label>Tipo de acesso<select name="role"><option value="entregador">Entregador</option><option value="vendedor">Vendedor</option></select></label><label>Nome completo<input name="full_name" required placeholder="Nome completo"></label><label>E-mail de acesso<input name="email" type="email" required placeholder="usuario@exemplo.com"></label><label data-phone-field>Telefone<input name="phone" placeholder="(17) 99999-9999"></label><label>Senha inicial<input name="password" type="password" minlength="8" required placeholder="Mínimo 8 caracteres"></label><button class="primary" type="submit">Criar usuário</button><p class="form-help">O usuário entrará com este e-mail e senha. O perfil define o que ele pode acessar.</p></form>');
   const form = modal.querySelector('#driver-form');
+  const roleSelect = form.querySelector('[name="role"]');
+  const phoneField = form.querySelector('[data-phone-field]');
+  const syncFields = () => { phoneField.style.display = roleSelect.value === 'entregador' ? 'grid' : 'none'; };
+  roleSelect.addEventListener('change', syncFields); syncFields();
+
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const button = form.querySelector('button[type="submit"]');
     const fd = new FormData(form);
+    const role = String(fd.get('role') || 'entregador');
     button.disabled = true; button.textContent = 'Criando...';
     const { data, error } = await supabase.functions.invoke('delivery-admin-create-driver', {
       body: {
         full_name: fd.get('full_name'),
         email: fd.get('email'),
         phone: fd.get('phone'),
-        password: fd.get('password')
+        password: fd.get('password'),
+        role
       }
     });
     if (error || data?.error) {
-      button.disabled = false; button.textContent = 'Criar entregador';
-      alert(data?.error || 'Não foi possível criar o entregador.');
+      button.disabled = false; button.textContent = 'Criar usuário';
+      alert(data?.error || 'Não foi possível criar o usuário.');
       return;
     }
     modal.remove();
     await loadAdminDashboard();
-    alert('Entregador criado com sucesso.');
+    alert(role === 'vendedor' ? 'Vendedor criado com sucesso.' : 'Entregador criado com sucesso.');
   });
 }
-
 async function openNewDeliveryModal() {
   const { data: drivers = [] } = await supabase.from('delivery_drivers').select('user_id,full_name').eq('active',true).order('full_name');
   const options = ['<option value="">Aguardando entregador</option>'].concat(drivers.map(d => '<option value="' + d.user_id + '">' + escapeHtml(d.full_name) + '</option>')).join('');
