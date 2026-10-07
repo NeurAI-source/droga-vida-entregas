@@ -45,3 +45,7 @@ input, textarea, select, [contenteditable="true"] {
   user-select: text;
   -webkit-touch-callout: default;
 }
+
+.accept-delivery{border:0;background:var(--yellow);color:#15210a;font-weight:900;border-radius:12px;padding:11px 13px;cursor:pointer;white-space:nowrap}
+.accept-delivery:disabled{opacity:.65;cursor:wait}
+@media(max-width:900px){.accept-delivery{width:100%}}
