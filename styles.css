@@ -49,3 +49,15 @@ input, textarea, select, [contenteditable="true"] {
 .accept-delivery{border:0;background:var(--yellow);color:#15210a;font-weight:900;border-radius:12px;padding:11px 13px;cursor:pointer;white-space:nowrap}
 .accept-delivery:disabled{opacity:.65;cursor:wait}
 @media(max-width:900px){.accept-delivery{width:100%}}
+
+.driver-map-card{position:relative}
+.map-fullscreen-btn{position:absolute;z-index:800;right:14px;top:14px;border:1px solid rgba(255,255,255,.16);background:rgba(7,23,15,.92);color:#fff;border-radius:12px;padding:10px 12px;font-weight:800;font-size:11px;cursor:pointer;backdrop-filter:blur(8px);box-shadow:0 8px 24px #0004}
+.driver-map-card.is-fullscreen{position:fixed!important;inset:0!important;z-index:4500!important;width:100vw!important;height:100dvh!important;max-height:none!important;border-radius:0!important;margin:0!important}
+.driver-map-card.is-fullscreen #map{width:100%!important;height:100%!important;min-height:100dvh!important}
+.driver-map-card.is-fullscreen .map-float{top:70px;left:14px;right:14px;bottom:auto}
+.driver-map-card.is-fullscreen .map-fullscreen-btn{top:14px;right:14px;font-size:12px;padding:11px 14px}
+body.map-fullscreen-open{overflow:hidden;touch-action:none}
+@media(max-width:900px){
+  .map-fullscreen-btn{top:12px;right:12px}
+  .driver-map-card.is-fullscreen .leaflet-control-zoom{margin-bottom:20px!important}
+}
