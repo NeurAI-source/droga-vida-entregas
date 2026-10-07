@@ -4,7 +4,7 @@ import { config } from './public-config.js';
 
 const app = document.querySelector('#app');
 const supabase = config.url && config.key ? createClient(config.url, config.key) : null;
-const state = { user: null, profile: null, map: null, demo: !supabase };
+const state = { user: null, profile: null, map: null, markers: new Map(), channel: null, watchId: null, demo: !supabase };
 
 function icon(name) {
   const icons = {
@@ -82,10 +82,18 @@ async function loadProfile(user) {
   routeByRole();
 }
 
-function logout() {
-  if (supabase) supabase.auth.signOut();
+async function logout() {
+  if (state.watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(state.watchId);
+  state.watchId = null;
+  if (state.channel && supabase) await supabase.removeChannel(state.channel);
+  state.channel = null;
+  if (supabase && state.user?.id && state.profile?.role === 'entregador') {
+    await supabase.from('driver_locations').update({ sharing: false, updated_at: new Date().toISOString() }).eq('driver_id', state.user.id);
+  }
+  if (supabase) await supabase.auth.signOut();
   state.user = null; state.profile = null;
   if (state.map) { state.map.remove(); state.map = null; }
+  state.markers.clear();
   loginView();
 }
 
@@ -103,11 +111,13 @@ function driverView() {
         <h2>Adicionar entrega</h2>
         <div class="quick-actions"><button>${icon('camera')}<span>Foto</span></button><button>${icon('keyboard')}<span>Manual</span></button><button>${icon('box')}<span>Pedidos</span></button></div>
         <div class="next-stop"><div><p class="eyebrow">PRÓXIMA ENTREGA</p><h3>Pedido #1058</h3><p>Rua exemplo, 885 · São José do Rio Preto</p></div><div class="eta"><strong>8 min</strong><span>3,2 km</span></div></div>
-        <button class="primary big">${icon('route')} Iniciar rota</button>
+        <button class="primary big" id="share-location">${icon('map')} Iniciar localização ao vivo</button>
+        <p style="font-size:11px;color:#9fb1a7;line-height:1.45">Sua localização só é compartilhada enquanto este botão estiver ativo.</p>
       </section>
     </main>
   `, 'driver');
   document.querySelector('#logout').addEventListener('click', logout);
+  document.querySelector('#share-location').addEventListener('click', toggleLocationSharing);
   initMap('driver');
 }
 
@@ -122,6 +132,7 @@ function adminView() {
   `, 'admin');
   document.querySelector('#logout').addEventListener('click', logout);
   initMap('admin');
+  if (!state.demo) loadAdminRealtime();
 }
 
 function driverRow(name, detail, status, ago) {
@@ -130,10 +141,12 @@ function driverRow(name, detail, status, ago) {
 
 function initMap(mode) {
   if (state.map) state.map.remove();
+  state.markers.clear();
   const center = [-20.8113, -49.3758];
   state.map = L.map('map', { zoomControl: false }).setView(center, 13);
   L.control.zoom({ position: 'bottomright' }).addTo(state.map);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 }).addTo(state.map);
+  if (!state.demo) return;
   const points = mode === 'admin'
     ? [[-20.807,-49.376,'João'],[-20.818,-49.365,'Marcos'],[-20.801,-49.389,'Pedro']]
     : [[-20.8113,-49.3758,'Você'],[-20.804,-49.369,'Próxima entrega']];
@@ -141,6 +154,84 @@ function initMap(mode) {
     const marker = L.circleMarker([lat,lng], { radius: idx ? 9 : 11, weight: 4, fillOpacity: 1 }).addTo(state.map);
     marker.bindTooltip(label, { permanent: mode === 'admin', direction: 'top', offset: [0,-10] });
   });
+}
+
+
+function setLiveMarker(id, lat, lng, label, sharing = true) {
+  if (!state.map || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  let marker = state.markers.get(id);
+  if (!marker) {
+    marker = L.circleMarker([lat,lng], { radius: 10, weight: 4, fillOpacity: 1 }).addTo(state.map);
+    state.markers.set(id, marker);
+  } else {
+    marker.setLatLng([lat,lng]);
+  }
+  marker.setStyle({ opacity: sharing ? 1 : .45, fillOpacity: sharing ? 1 : .35 });
+  marker.bindTooltip(label || 'Entregador', { direction: 'top', offset: [0,-10] });
+}
+
+async function toggleLocationSharing() {
+  const btn = document.querySelector('#share-location');
+  if (state.watchId !== null) {
+    navigator.geolocation.clearWatch(state.watchId);
+    state.watchId = null;
+    if (supabase && state.user?.id) {
+      await supabase.from('driver_locations').update({ sharing: false, updated_at: new Date().toISOString() }).eq('driver_id', state.user.id);
+    }
+    if (btn) btn.textContent = '⌖ Iniciar localização ao vivo';
+    return;
+  }
+  if (!navigator.geolocation) return alert('Este aparelho não oferece geolocalização.');
+  if (!supabase) return alert('O rastreamento real funciona após conectar o Supabase.');
+  if (btn) btn.textContent = '■ Parar localização ao vivo';
+  state.watchId = navigator.geolocation.watchPosition(async position => {
+    const c = position.coords;
+    setLiveMarker(state.user.id, c.latitude, c.longitude, 'Você', true);
+    state.map?.setView([c.latitude,c.longitude], Math.max(state.map.getZoom(), 15));
+    await supabase.from('driver_locations').upsert({
+      driver_id: state.user.id,
+      latitude: c.latitude,
+      longitude: c.longitude,
+      accuracy_m: c.accuracy ?? null,
+      heading: Number.isFinite(c.heading) ? c.heading : null,
+      speed_mps: Number.isFinite(c.speed) ? c.speed : null,
+      sharing: true,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'driver_id' });
+  }, () => {
+    state.watchId = null;
+    if (btn) btn.textContent = '⌖ Iniciar localização ao vivo';
+    alert('Permita o acesso à localização para usar o rastreamento.');
+  }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
+}
+
+function renderLiveDrivers(drivers, locations) {
+  const names = new Map(drivers.map(d => [d.user_id, d.full_name]));
+  const panel = document.querySelector('.drivers-panel');
+  if (!panel) return;
+  const active = locations.filter(l => l.sharing);
+  panel.innerHTML = '<div class="panel-title"><div><p class="eyebrow">EQUIPE</p><h2>Entregadores</h2></div><span>' + active.length + ' online</span></div>' +
+    (drivers.length ? drivers.map(d => {
+      const l = locations.find(x => x.driver_id === d.user_id);
+      const online = Boolean(l?.sharing);
+      return '<article class="driver-row"><div class="avatar">' + (d.full_name?.[0] || '?') + '</div><div><strong>' + (d.full_name || 'Entregador') + '</strong><span>' + (online ? 'Localização ao vivo' : 'Localização desligada') + '</span><small><i style="background:' + (online ? '#49d17d' : '#7d8a82') + '"></i>' + (l?.updated_at ? new Date(l.updated_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : 'sem posição') + '</small></div><button>›</button></article>';
+    }).join('') : '<p style="color:#9fb1a7;font-size:12px;padding:18px 0">Nenhum entregador cadastrado ainda.</p>');
+  locations.forEach(l => setLiveMarker(l.driver_id, Number(l.latitude), Number(l.longitude), names.get(l.driver_id) || 'Entregador', l.sharing));
+}
+
+async function loadAdminRealtime() {
+  const [{ data: drivers = [] }, { data: locations = [] }] = await Promise.all([
+    supabase.from('delivery_drivers').select('user_id,full_name,active').eq('active', true).order('full_name'),
+    supabase.from('driver_locations').select('driver_id,latitude,longitude,sharing,updated_at')
+  ]);
+  renderLiveDrivers(drivers, locations);
+  if (state.channel) await supabase.removeChannel(state.channel);
+  state.channel = supabase.channel('admin-driver-locations')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_locations' }, async () => {
+      const { data: fresh = [] } = await supabase.from('driver_locations').select('driver_id,latitude,longitude,sharing,updated_at');
+      renderLiveDrivers(drivers, fresh);
+    })
+    .subscribe();
 }
 
 function routeByRole() {
