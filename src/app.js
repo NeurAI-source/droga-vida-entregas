@@ -156,9 +156,9 @@ function escapeHtml(value='') {
 }
 
 async function loadDriverDashboard() {
-  const monthIso = startOfMonth().toISOString();
+  const statsIso = new Date(Math.min(startOfWeek().getTime(), startOfMonth().getTime())).toISOString();
   const [{ data: completed = [], error: completedError }, { data: pending = [], error: pendingError }] = await Promise.all([
-    supabase.from('deliveries').select('id,completed_at').eq('driver_id', state.user.id).eq('status','entregue').gte('completed_at', monthIso),
+    supabase.from('deliveries').select('id,completed_at').eq('driver_id', state.user.id).eq('status','entregue').gte('completed_at', statsIso),
     supabase.from('deliveries').select('id,order_code,customer_name,customer_phone,address_text,street,street_number,neighborhood,status,route_position,created_at').eq('driver_id', state.user.id).neq('status','entregue').neq('status','cancelada').order('route_position',{ascending:true,nullsFirst:false}).order('created_at',{ascending:true})
   ]);
   const list = document.querySelector('#driver-deliveries');
@@ -192,11 +192,11 @@ async function completeDelivery(deliveryId, button) {
 
 async function loadAdminDashboard() {
   const dayIso = startOfDay().toISOString();
-  const monthIso = startOfMonth().toISOString();
+  const statsIso = new Date(Math.min(startOfWeek().getTime(), startOfMonth().getTime())).toISOString();
   const [{ data: drivers = [] }, { data: today = [] }, { data: monthCompleted = [] }] = await Promise.all([
     supabase.from('delivery_drivers').select('user_id,full_name,active').eq('active',true).order('full_name'),
     supabase.from('deliveries').select('id,status,driver_id,created_at,completed_at').gte('created_at',dayIso),
-    supabase.from('deliveries').select('driver_id,completed_at').eq('status','entregue').gte('completed_at',monthIso)
+    supabase.from('deliveries').select('driver_id,completed_at').eq('status','entregue').gte('completed_at',statsIso)
   ]);
   document.querySelector('#admin-drivers').textContent = drivers.length;
   document.querySelector('#admin-total').textContent = today.length;
