@@ -289,9 +289,9 @@ function renderSellerQueue(queue, drivers) {
     const options = ['<option value="">Sem entregador</option>'].concat(drivers.map(d => '<option value="' + d.user_id + '"' + (item.driver_id === d.user_id ? ' selected' : '') + '>' + escapeHtml(d.full_name) + '</option>')).join('');
     const code = item.order_code ? '#' + escapeHtml(item.order_code) : 'Sem código';
     const driverSelect = isClosed
-      ? '<span class="closed-status">' + escapeHtml(item.status.replaceAll('_',' ')) + '</span>'
+      ? '<span class="closed-status">' + escapeHtml(deliveryStatusLabel(item.status)) + '</span>'
       : '<select class="queue-driver" data-seller-assign="' + item.id + '">' + options + '</select>';
-    return '<article class="queue-row"><div class="queue-code"><span>Pedido</span><strong>' + code + '</strong></div><div class="queue-main"><strong>' + escapeHtml(item.customer_name || 'Cliente') + '</strong><span>' + escapeHtml(item.address_text || 'Endereço não informado') + '</span><small>' + escapeHtml(item.status.replaceAll('_',' ')) + '</small></div>' + driverSelect + '</article>';
+    return '<article class="queue-row"><div class="queue-code"><span>Pedido</span><strong>' + code + '</strong></div><div class="queue-main"><strong>' + escapeHtml(item.customer_name || 'Cliente') + '</strong><span>' + escapeHtml(item.address_text || 'Endereço não informado') + '</span><small>' + escapeHtml(deliveryStatusLabel(item.status)) + '</small></div>' + driverSelect + '</article>';
   }).join('');
   holder.querySelectorAll('[data-seller-assign]').forEach(select => select.addEventListener('change', () => assignDelivery(select.dataset.sellerAssign, select.value)));
 }
@@ -321,7 +321,7 @@ function renderQueue(queue, drivers) {
   holder.innerHTML = queue.map(item => {
     const options = ['<option value="">Sem entregador</option>'].concat(drivers.map(d => '<option value="' + d.user_id + '"' + (item.driver_id === d.user_id ? ' selected' : '') + '>' + escapeHtml(d.full_name) + '</option>')).join('');
     const code = item.order_code ? '#' + escapeHtml(item.order_code) : 'Sem código';
-    return '<article class="queue-row"><div class="queue-code"><span>Pedido</span><strong>' + code + '</strong></div><div class="queue-main"><strong>' + escapeHtml(item.customer_name || 'Cliente') + '</strong><span>' + escapeHtml(item.address_text || 'Endereço não informado') + '</span><small>' + escapeHtml(item.status.replaceAll('_',' ')) + '</small></div><select class="queue-driver" data-assign="' + item.id + '">' + options + '</select></article>';
+    return '<article class="queue-row"><div class="queue-code"><span>Pedido</span><strong>' + code + '</strong></div><div class="queue-main"><strong>' + escapeHtml(item.customer_name || 'Cliente') + '</strong><span>' + escapeHtml(item.address_text || 'Endereço não informado') + '</span><small>' + escapeHtml(deliveryStatusLabel(item.status)) + '</small></div><select class="queue-driver" data-assign="' + item.id + '">' + options + '</select></article>';
   }).join('');
   holder.querySelectorAll('[data-assign]').forEach(select => select.addEventListener('change', () => assignDelivery(select.dataset.assign, select.value)));
 }
@@ -361,6 +361,19 @@ function escapeHtml(value='') {
   return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
 
+function deliveryStatusLabel(status='') {
+  const labels = {
+    aguardando: 'Aguardando entregador',
+    atribuida: 'Aguardando aceite',
+    aceita: 'Aceita',
+    em_rota: 'Em rota',
+    entregue: 'Entregue',
+    nao_entregue: 'Não entregue',
+    cancelada: 'Cancelada'
+  };
+  return labels[status] || String(status).replaceAll('_',' ');
+}
+
 async function loadDriverDashboard() {
   const statsIso = new Date(Math.min(startOfWeek().getTime(), startOfMonth().getTime())).toISOString();
   const [{ data: completed = [], error: completedError }, { data: pending = [], error: pendingError }] = await Promise.all([
@@ -380,10 +393,44 @@ async function loadDriverDashboard() {
     const address = delivery.address_text || [delivery.street,delivery.street_number,delivery.neighborhood].filter(Boolean).join(', ');
     const code = delivery.order_code ? '#' + escapeHtml(delivery.order_code) : 'Sem código';
     const customer = escapeHtml(delivery.customer_name || 'Cliente');
-    return '<article class="delivery-card"><div class="delivery-order"><span>' + (index === 0 ? 'PRÓXIMA' : 'ENTREGA') + '</span><strong>' + code + '</strong></div><div class="delivery-info"><h3>' + customer + '</h3><p>' + escapeHtml(address || 'Endereço não informado') + '</p><small>Status: ' + escapeHtml(delivery.status.replaceAll('_',' ')) + '</small></div><button class="complete-delivery" data-complete-delivery="' + delivery.id + '">✓ Concluir entrega</button></article>';
+    const action = delivery.status === 'atribuida'
+      ? '<button class="accept-delivery" data-accept-delivery="' + delivery.id + '">✓ Aceitar entrega</button>'
+      : '<button class="complete-delivery" data-complete-delivery="' + delivery.id + '">✓ Concluir entrega</button>';
+    return '<article class="delivery-card"><div class="delivery-order"><span>' + (index === 0 ? 'PRÓXIMA' : 'ENTREGA') + '</span><strong>' + code + '</strong></div><div class="delivery-info"><h3>' + customer + '</h3><p>' + escapeHtml(address || 'Endereço não informado') + '</p><small>Status: ' + escapeHtml(deliveryStatusLabel(delivery.status)) + '</small></div>' + action + '</article>';
   }).join('');
+  list.querySelectorAll('[data-accept-delivery]').forEach(btn => btn.addEventListener('click', () => acceptDelivery(btn.dataset.acceptDelivery, btn)));
   list.querySelectorAll('[data-complete-delivery]').forEach(btn => btn.addEventListener('click', () => completeDelivery(btn.dataset.completeDelivery, btn)));
   ensureDeliveryRealtime();
+}
+
+async function acceptDelivery(deliveryId, button) {
+  if (!deliveryId || !state.user?.id) return;
+  button.disabled = true;
+  button.textContent = 'Aceitando...';
+  const now = new Date().toISOString();
+
+  const { error } = await supabase
+    .from('deliveries')
+    .update({ status:'aceita', accepted_at:now })
+    .eq('id',deliveryId)
+    .eq('driver_id',state.user.id)
+    .eq('status','atribuida');
+
+  if (error) {
+    button.disabled = false;
+    button.textContent = '✓ Aceitar entrega';
+    alert('Não foi possível aceitar esta entrega.');
+    return;
+  }
+
+  await supabase.from('delivery_events').insert({
+    delivery_id:deliveryId,
+    driver_id:state.user.id,
+    event_type:'entrega_aceita',
+    payload:{ accepted_at:now }
+  });
+
+  await loadDriverDashboard();
 }
 
 async function completeDelivery(deliveryId, button) {
