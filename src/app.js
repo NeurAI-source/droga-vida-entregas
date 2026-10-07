@@ -330,7 +330,7 @@ async function loadSellerDashboard() {
     supabase.from('deliveries').select('id,order_code,customer_name,address_text,driver_id,status,created_at,completed_at').gte('created_at',dayIso).order('created_at',{ascending:false})
   ]);
   document.querySelector('#seller-total').textContent = deliveries.length;
-  document.querySelector('#seller-open').textContent = deliveries.filter(d => !['entregue','cancelada'].includes(d.status)).length;
+  document.querySelector('#seller-open').textContent = deliveries.filter(d => !['entregue','cancelada','nao_entregue'].includes(d.status)).length;
   document.querySelector('#seller-done').textContent = deliveries.filter(d => d.status === 'entregue').length;
   renderSellerQueue(deliveries,drivers);
   ensureDeliveryRealtime();
@@ -563,28 +563,43 @@ async function loadDriverDashboard() {
   const statsIso = new Date(Math.min(startOfWeek().getTime(), startOfMonth().getTime())).toISOString();
   const [{ data: completed = [], error: completedError }, { data: pending = [], error: pendingError }] = await Promise.all([
     supabase.from('deliveries').select('id,completed_at').eq('driver_id', state.user.id).eq('status','entregue').gte('completed_at', statsIso),
-    supabase.from('deliveries').select('id,order_code,customer_name,customer_phone,address_text,street,street_number,neighborhood,status,route_position,created_at').eq('driver_id', state.user.id).neq('status','entregue').neq('status','cancelada').order('route_position',{ascending:true,nullsFirst:false}).order('created_at',{ascending:true})
+    supabase.from('deliveries').select('id,order_code,customer_name,customer_phone,address_text,street,street_number,neighborhood,status,route_position,created_at,accepted_at,notes').eq('driver_id', state.user.id).neq('status','entregue').neq('status','cancelada').neq('status','nao_entregue').order('route_position',{ascending:true,nullsFirst:false}).order('created_at',{ascending:true})
   ]);
   const list = document.querySelector('#driver-deliveries');
   if (completedError || pendingError) { if (list) list.innerHTML = '<p class="empty-state">Não foi possível carregar suas entregas.</p>'; return; }
+  state.driverDeliveries = pending;
   const perf = countPerformance(completed);
   document.querySelector('#driver-today').textContent = perf.today;
   document.querySelector('#driver-week').textContent = perf.week;
   document.querySelector('#driver-month').textContent = perf.month;
   document.querySelector('#driver-pending-count').textContent = pending.length;
+  const routeBtn = document.querySelector('#open-all-route');
+  if (routeBtn) {
+    const routeCount = pending.filter(d => ['aceita','em_rota'].includes(d.status)).length;
+    routeBtn.disabled = routeCount === 0;
+    routeBtn.textContent = routeCount ? '↗ Abrir rota no Google Maps (' + routeCount + ')' : '↗ Aceite uma entrega para abrir a rota';
+  }
   if (!list) return;
   if (!pending.length) { list.innerHTML = '<div class="empty-state success-empty">✓ Nenhuma entrega pendente agora.</div>'; return; }
   list.innerHTML = pending.map((delivery,index) => {
     const address = delivery.address_text || [delivery.street,delivery.street_number,delivery.neighborhood].filter(Boolean).join(', ');
     const code = delivery.order_code ? '#' + escapeHtml(delivery.order_code) : 'Sem código';
     const customer = escapeHtml(delivery.customer_name || 'Cliente');
-    const action = delivery.status === 'atribuida'
+    const contactActions = '<div class="delivery-tools"><button type="button" data-map-delivery="' + delivery.id + '">↗ Maps</button>' +
+      (delivery.customer_phone ? '<button type="button" data-whatsapp-delivery="' + delivery.id + '">WhatsApp</button><button type="button" data-call-delivery="' + delivery.id + '">Ligar</button>' : '') + '</div>';
+    const mainAction = delivery.status === 'atribuida'
       ? '<button class="accept-delivery" data-accept-delivery="' + delivery.id + '">✓ Aceitar entrega</button>'
-      : '<button class="complete-delivery" data-complete-delivery="' + delivery.id + '">✓ Concluir entrega</button>';
-    return '<article class="delivery-card"><div class="delivery-order"><span>' + (index === 0 ? 'PRÓXIMA' : 'ENTREGA') + '</span><strong>' + code + '</strong></div><div class="delivery-info"><h3>' + customer + '</h3><p>' + escapeHtml(address || 'Endereço não informado') + '</p><small>Status: ' + escapeHtml(deliveryStatusLabel(delivery.status)) + '</small></div>' + action + '</article>';
+      : '<div class="delivery-final-actions"><button class="complete-delivery" data-complete-delivery="' + delivery.id + '">✓ Concluir entrega</button><button class="not-delivered" data-not-delivered="' + delivery.id + '">Não entregue</button></div>';
+    const note = delivery.notes ? '<p class="delivery-note">Obs.: ' + escapeHtml(delivery.notes) + '</p>' : '';
+    return '<article class="delivery-card"><div class="delivery-order"><span>' + (index === 0 ? 'PRÓXIMA' : 'ENTREGA') + '</span><strong>' + code + '</strong></div><div class="delivery-info"><h3>' + customer + '</h3><p>' + escapeHtml(address || 'Endereço não informado') + '</p>' + note + '<small>Status: ' + escapeHtml(deliveryStatusLabel(delivery.status)) + '</small>' + contactActions + '</div>' + mainAction + '</article>';
   }).join('');
+  const getDelivery = id => state.driverDeliveries.find(d => d.id === id);
   list.querySelectorAll('[data-accept-delivery]').forEach(btn => btn.addEventListener('click', () => acceptDelivery(btn.dataset.acceptDelivery, btn)));
-  list.querySelectorAll('[data-complete-delivery]').forEach(btn => btn.addEventListener('click', () => completeDelivery(btn.dataset.completeDelivery, btn)));
+  list.querySelectorAll('[data-complete-delivery]').forEach(btn => btn.addEventListener('click', () => openCompleteDeliveryModal(btn.dataset.completeDelivery)));
+  list.querySelectorAll('[data-not-delivered]').forEach(btn => btn.addEventListener('click', () => openNotDeliveredModal(btn.dataset.notDelivered)));
+  list.querySelectorAll('[data-map-delivery]').forEach(btn => btn.addEventListener('click', () => openDeliveryMaps(getDelivery(btn.dataset.mapDelivery))));
+  list.querySelectorAll('[data-whatsapp-delivery]').forEach(btn => btn.addEventListener('click', () => contactWhatsApp(getDelivery(btn.dataset.whatsappDelivery))));
+  list.querySelectorAll('[data-call-delivery]').forEach(btn => btn.addEventListener('click', () => callCustomer(getDelivery(btn.dataset.callDelivery))));
   ensureDeliveryRealtime();
 }
 
@@ -618,17 +633,9 @@ async function acceptDelivery(deliveryId, button) {
   await loadDriverDashboard();
 }
 
-async function completeDelivery(deliveryId, button) {
-  if (!deliveryId || !state.user?.id) return;
-  if (!confirm('Confirmar que esta entrega foi concluída?')) return;
-  button.disabled = true; button.textContent = 'Concluindo...';
-  const now = new Date().toISOString();
-  const { error } = await supabase.from('deliveries').update({ status:'entregue', completed_at: now }).eq('id', deliveryId).eq('driver_id', state.user.id);
-  if (error) { button.disabled = false; button.textContent = '✓ Concluir entrega'; alert('Não foi possível concluir esta entrega.'); return; }
-  await supabase.from('delivery_events').insert({ delivery_id: deliveryId, driver_id: state.user.id, event_type: 'entrega_concluida', payload: { completed_at: now } });
-  await loadDriverDashboard();
+async function completeDelivery(deliveryId) {
+  return openCompleteDeliveryModal(deliveryId);
 }
-
 async function loadAdminDashboard() {
   const dayIso = startOfDay().toISOString();
   const statsIso = new Date(Math.min(startOfWeek().getTime(), startOfMonth().getTime())).toISOString();
@@ -636,7 +643,7 @@ async function loadAdminDashboard() {
     supabase.from('delivery_drivers').select('user_id,full_name,active').eq('active',true).order('full_name'),
     supabase.from('deliveries').select('id,status,driver_id,created_at,completed_at').gte('created_at',dayIso),
     supabase.from('deliveries').select('driver_id,completed_at').eq('status','entregue').gte('completed_at',statsIso),
-    supabase.from('deliveries').select('id,order_code,customer_name,address_text,driver_id,status,created_at').neq('status','entregue').neq('status','cancelada').order('created_at',{ascending:false}).limit(100)
+    supabase.from('deliveries').select('id,order_code,customer_name,address_text,driver_id,status,created_at').neq('status','entregue').neq('status','cancelada').neq('status','nao_entregue').order('created_at',{ascending:false}).limit(100)
   ]);
   document.querySelector('#admin-drivers').textContent = drivers.length;
   document.querySelector('#admin-total').textContent = today.length;
