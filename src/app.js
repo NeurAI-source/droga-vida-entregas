@@ -53,43 +53,62 @@ function loginView(message='') {
   }));
 }
 
+function roleChoiceView(profiles) {
+  app.innerHTML = shell(`
+    <main class="role-page">
+      <section class="role-card">
+        <div class="brand-mark">DV</div>
+        <p class="eyebrow">DROGA VIDA ENTREGAS</p>
+        <h2>Como você quer entrar?</h2>
+        <p class="muted">Este login possui mais de um tipo de acesso.</p>
+        <div class="role-options">
+          ${profiles.map((profile,index) => {
+            const title = profile.role === 'admin' ? 'Administrador' : (profile.role === 'vendedor' ? 'Vendedor' : 'Entregador');
+            const detail = profile.role === 'admin'
+              ? 'Gerenciar operação, usuários e desempenho.'
+              : (profile.role === 'vendedor' ? 'Montar e enviar entregas.' : 'Receber e concluir entregas.');
+            return '<button class="role-option" data-role-index="' + index + '"><strong>' + title + '</strong><span>' + detail + '</span></button>';
+          }).join('')}
+        </div>
+        <button class="secondary role-logout" id="role-logout">Sair</button>
+      </section>
+    </main>
+  `);
+
+  document.querySelectorAll('[data-role-index]').forEach(btn => btn.addEventListener('click', () => {
+    state.profile = profiles[Number(btn.dataset.roleIndex)];
+    routeByRole();
+  }));
+  document.querySelector('#role-logout').addEventListener('click', logout);
+}
+
 async function loadProfile(user) {
   state.user = user;
 
-  const { data: staff } = await supabase
-    .from('team_members')
-    .select('user_id, role, active')
-    .eq('user_id', user.id)
-    .maybeSingle();
+  const [{ data: staff }, { data: seller }, { data: driver }] = await Promise.all([
+    supabase.from('team_members').select('user_id,role,active').eq('user_id',user.id).maybeSingle(),
+    supabase.from('delivery_staff').select('user_id,full_name,role,active').eq('user_id',user.id).maybeSingle(),
+    supabase.from('delivery_drivers').select('user_id,full_name,active').eq('user_id',user.id).maybeSingle()
+  ]);
 
-  if (staff?.active && ['owner', 'admin'].includes(staff.role)) {
-    state.profile = { id: user.id, full_name: 'Administrador', role: 'admin', active: true };
-    return routeByRole();
+  const profiles = [];
+  if (staff?.active && ['owner','admin'].includes(staff.role)) {
+    profiles.push({ id:user.id, full_name:'Administrador', role:'admin', active:true });
   }
-
-  const { data: seller } = await supabase
-    .from('delivery_staff')
-    .select('user_id, full_name, role, active')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
   if (seller?.active && seller.role === 'vendedor') {
-    state.profile = { id: seller.user_id, full_name: seller.full_name, role: 'vendedor', active: true };
-    return routeByRole();
+    profiles.push({ id:seller.user_id, full_name:seller.full_name, role:'vendedor', active:true });
+  }
+  if (driver?.active) {
+    profiles.push({ id:driver.user_id, full_name:driver.full_name, role:'entregador', active:true });
   }
 
-  const { data: driver } = await supabase
-    .from('delivery_drivers')
-    .select('user_id, full_name, active')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  if (!driver?.active) {
+  if (!profiles.length) {
     await supabase.auth.signOut();
     return loginView('Seu acesso ao Droga Vida Entregas não está liberado.');
   }
 
-  state.profile = { id: driver.user_id, full_name: driver.full_name, role: 'entregador', active: true };
+  if (profiles.length > 1) return roleChoiceView(profiles);
+  state.profile = profiles[0];
   routeByRole();
 }
 
