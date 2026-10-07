@@ -504,3 +504,13 @@ body{background:var(--bg);color:var(--ink)}
 @media(max-width:900px){
   .modal-card:has(#history-list),.modal-card:has(#user-manager){width:100%}
 }
+
+/* Navegação lateral admin */
+#admin-map-section,
+#admin-deliveries-section,
+#admin-drivers-section{scroll-margin-top:24px}
+
+.sidebar nav button{
+  transition:background .18s,color .18s,transform .18s;
+}
+.sidebar nav button:active{transform:scale(.98)}
