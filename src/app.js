@@ -198,8 +198,8 @@ function adminView() {
       ${topbar('Operação de hoje', 'Acompanhe entregadores, rotas e pedidos em um só lugar.')}
       <section class="admin-actions"><button class="primary inline" id="new-delivery">+ Nova entrega</button><button class="secondary" id="new-driver">+ Novo usuário</button><button class="secondary" id="manage-users">Gerenciar usuários</button><button class="secondary" id="open-history">Histórico</button></section>
       <section class="metrics"><article><span>Entregadores ativos</span><strong id="admin-drivers">0</strong><small>cadastrados</small></article><article><span>Entregas totais</span><strong id="admin-total">0</strong><small>hoje</small></article><article><span>Concluídas</span><strong id="admin-completed">0</strong><small>hoje</small></article><article><span>Aguardando</span><strong id="admin-waiting">0</strong><small>sem conclusão</small></article></section>
-      <section class="ops-grid"><div class="map-card admin-map"><div id="map"></div><div class="map-legend"><span><i class="green"></i>Em rota</span><span><i class="yellow"></i>Parado</span><span><i class="gray"></i>Offline</span></div></div><aside class="drivers-panel"><div class="panel-title"><div><p class="eyebrow">DESEMPENHO</p><h2>Entregadores</h2></div><span id="admin-driver-label">0 ativos</span></div><div id="admin-driver-stats"><p class="empty-state">Carregando...</p></div></aside></section>
-      <section class="queue-panel"><div class="panel-title"><div><p class="eyebrow">FILA</p><h2>Entregas em aberto</h2></div><span id="queue-count">0</span></div><div id="admin-delivery-queue" class="queue-list"><p class="empty-state">Carregando fila...</p></div></section>
+      <section class="ops-grid" id="admin-map-section"><div class="map-card admin-map"><div id="map"></div><div class="map-legend"><span><i class="green"></i>Em rota</span><span><i class="yellow"></i>Parado</span><span><i class="gray"></i>Offline</span></div></div><aside class="drivers-panel" id="admin-drivers-section"><div class="panel-title"><div><p class="eyebrow">DESEMPENHO</p><h2>Entregadores</h2></div><span id="admin-driver-label">0 ativos</span></div><div id="admin-driver-stats"><p class="empty-state">Carregando...</p></div></aside></section>
+      <section class="queue-panel" id="admin-deliveries-section"><div class="panel-title"><div><p class="eyebrow">FILA</p><h2>Entregas em aberto</h2></div><span id="queue-count">0</span></div><div id="admin-delivery-queue" class="queue-list"><p class="empty-state">Carregando fila...</p></div></section>
     </main>
   `, 'admin');
   document.querySelector('#logout').addEventListener('click', logout);
@@ -207,10 +207,20 @@ function adminView() {
   document.querySelector('#new-driver').addEventListener('click', openNewDriverModal);
   document.querySelector('#manage-users').addEventListener('click', openUserManagerModal);
   document.querySelector('#open-history').addEventListener('click', openHistoryModal);
-  const adminNav = document.querySelectorAll('.sidebar nav button');
-  if (adminNav[1]) adminNav[1].addEventListener('click', () => document.querySelector('.queue-panel')?.scrollIntoView({behavior:'smooth'}));
-  if (adminNav[2]) adminNav[2].addEventListener('click', openUserManagerModal);
-  if (adminNav[3]) adminNav[3].addEventListener('click', openHistoryModal);
+  const adminNav = [...document.querySelectorAll('.sidebar nav button')];
+  const setAdminNavActive = (index) => {
+    adminNav.forEach((btn,i) => btn.classList.toggle('active',i === index));
+  };
+  const goToAdminSection = (selector,index) => {
+    const target = document.querySelector(selector);
+    if (!target) return;
+    setAdminNavActive(index);
+    target.scrollIntoView({behavior:'smooth',block:'start'});
+  };
+  if (adminNav[0]) adminNav[0].addEventListener('click', () => goToAdminSection('#admin-map-section',0));
+  if (adminNav[1]) adminNav[1].addEventListener('click', () => goToAdminSection('#admin-deliveries-section',1));
+  if (adminNav[2]) adminNav[2].addEventListener('click', () => goToAdminSection('#admin-drivers-section',2));
+  if (adminNav[3]) adminNav[3].addEventListener('click', () => { setAdminNavActive(3); openHistoryModal(); });
   initMap('admin');
   if (!state.demo) loadAdminDashboard();
 }
