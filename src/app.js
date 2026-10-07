@@ -105,15 +105,16 @@ function driverView() {
     <main class="driver-layout">
       <section class="map-card"><div id="map"></div><div class="map-float"><strong>Rota inteligente</strong><span>Mapa-base pronto para receber trânsito e otimização.</span></div></section>
       <section class="driver-sheet">
-        <div class="metrics compact"><article><span>Hoje</span><strong>8</strong><small>entregas</small></article><article><span>Concluídas</span><strong>5</strong><small>pedidos</small></article><article><span>Pendentes</span><strong>3</strong><small>na rota</small></article></div>
+        <div class="metrics compact performance-metrics"><article><span>Hoje</span><strong id="driver-today">0</strong><small>concluídas</small></article><article><span>Semana</span><strong id="driver-week">0</strong><small>concluídas</small></article><article><span>Mês</span><strong id="driver-month">0</strong><small>concluídas</small></article></div>
         <h2>Adicionar entrega</h2>
         <div class="quick-actions"><button>${icon('camera')}<span>Foto</span></button><button>${icon('keyboard')}<span>Manual</span></button><button>${icon('box')}<span>Pedidos</span></button></div>
-        <div class="next-stop"><div><p class="eyebrow">PRÓXIMA ENTREGA</p><h3>Pedido #1058</h3><p>Rua exemplo, 885 · São José do Rio Preto</p></div><div class="eta"><strong>8 min</strong><span>3,2 km</span></div></div>
+        <div class="delivery-section"><div class="section-heading"><div><p class="eyebrow">MINHAS ENTREGAS</p><h2>Pendentes</h2></div><span id="driver-pending-count">0</span></div><div id="driver-deliveries" class="delivery-list"><p class="empty-state">Carregando entregas...</p></div></div>
       </section>
     </main>
   `, 'driver');
   document.querySelector('#logout').addEventListener('click', logout);
   initMap('driver');
+  if (!state.demo) loadDriverDashboard();
 }
 
 function adminView() {
@@ -121,13 +122,94 @@ function adminView() {
     <aside class="sidebar"><div class="side-brand"><div class="brand-mark small">DV</div><div><strong>Entregas</strong><span>Central operacional</span></div></div><nav><button class="active">${icon('map')} Mapa ao vivo</button><button>${icon('box')} Entregas</button><button>${icon('users')} Entregadores</button><button>${icon('clock')} Histórico</button></nav><div class="side-user"><span>${icon('admin')}</span><div><strong>${state.profile?.full_name || 'Administrador'}</strong><small>Administrador</small></div></div></aside>
     <main class="admin-main">
       ${topbar('Operação de hoje', 'Acompanhe entregadores, rotas e pedidos em um só lugar.')}
-      <section class="metrics"><article><span>Entregadores online</span><strong>3</strong><small>de 3 ativos</small></article><article><span>Entregas totais</span><strong>24</strong><small>hoje</small></article><article><span>Concluídas</span><strong>16</strong><small>67% do dia</small></article><article><span>Aguardando</span><strong>2</strong><small>sem entregador</small></article></section>
-      <section class="ops-grid"><div class="map-card admin-map"><div id="map"></div><div class="map-legend"><span><i class="green"></i>Em rota</span><span><i class="yellow"></i>Parado</span><span><i class="gray"></i>Offline</span></div></div><aside class="drivers-panel"><div class="panel-title"><div><p class="eyebrow">EQUIPE</p><h2>Entregadores</h2></div><span>3 online</span></div>${driverRow('João','Pedido #1284','Em rota','8 s')}${driverRow('Marcos','Pedido #1291','Em rota','12 s')}${driverRow('Pedro','Aguardando pedido','Parado','25 s')}</aside></section>
+      <section class="metrics"><article><span>Entregadores ativos</span><strong id="admin-drivers">0</strong><small>cadastrados</small></article><article><span>Entregas totais</span><strong id="admin-total">0</strong><small>hoje</small></article><article><span>Concluídas</span><strong id="admin-completed">0</strong><small>hoje</small></article><article><span>Aguardando</span><strong id="admin-waiting">0</strong><small>sem conclusão</small></article></section>
+      <section class="ops-grid"><div class="map-card admin-map"><div id="map"></div><div class="map-legend"><span><i class="green"></i>Em rota</span><span><i class="yellow"></i>Parado</span><span><i class="gray"></i>Offline</span></div></div><aside class="drivers-panel"><div class="panel-title"><div><p class="eyebrow">DESEMPENHO</p><h2>Entregadores</h2></div><span id="admin-driver-label">0 ativos</span></div><div id="admin-driver-stats"><p class="empty-state">Carregando...</p></div></aside></section>
     </main>
   `, 'admin');
   document.querySelector('#logout').addEventListener('click', logout);
   initMap('admin');
-  if (!state.demo) loadAdminRealtime();
+  if (!state.demo) loadAdminDashboard();
+}
+
+function startOfDay(date = new Date()) {
+  const d = new Date(date); d.setHours(0,0,0,0); return d;
+}
+function startOfWeek(date = new Date()) {
+  const d = startOfDay(date); const day = d.getDay(); const diff = day === 0 ? -6 : 1 - day; d.setDate(d.getDate() + diff); return d;
+}
+function startOfMonth(date = new Date()) {
+  const d = startOfDay(date); d.setDate(1); return d;
+}
+function countPerformance(rows = []) {
+  const day = startOfDay().getTime();
+  const week = startOfWeek().getTime();
+  const month = startOfMonth().getTime();
+  const times = rows.map(r => new Date(r.completed_at).getTime()).filter(Number.isFinite);
+  return {
+    today: times.filter(t => t >= day).length,
+    week: times.filter(t => t >= week).length,
+    month: times.filter(t => t >= month).length
+  };
+}
+function escapeHtml(value='') {
+  return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+async function loadDriverDashboard() {
+  const monthIso = startOfMonth().toISOString();
+  const [{ data: completed = [], error: completedError }, { data: pending = [], error: pendingError }] = await Promise.all([
+    supabase.from('deliveries').select('id,completed_at').eq('driver_id', state.user.id).eq('status','entregue').gte('completed_at', monthIso),
+    supabase.from('deliveries').select('id,order_code,customer_name,customer_phone,address_text,street,street_number,neighborhood,status,route_position,created_at').eq('driver_id', state.user.id).neq('status','entregue').neq('status','cancelada').order('route_position',{ascending:true,nullsFirst:false}).order('created_at',{ascending:true})
+  ]);
+  const list = document.querySelector('#driver-deliveries');
+  if (completedError || pendingError) { if (list) list.innerHTML = '<p class="empty-state">Não foi possível carregar suas entregas.</p>'; return; }
+  const perf = countPerformance(completed);
+  document.querySelector('#driver-today').textContent = perf.today;
+  document.querySelector('#driver-week').textContent = perf.week;
+  document.querySelector('#driver-month').textContent = perf.month;
+  document.querySelector('#driver-pending-count').textContent = pending.length;
+  if (!list) return;
+  if (!pending.length) { list.innerHTML = '<div class="empty-state success-empty">✓ Nenhuma entrega pendente agora.</div>'; return; }
+  list.innerHTML = pending.map((delivery,index) => {
+    const address = delivery.address_text || [delivery.street,delivery.street_number,delivery.neighborhood].filter(Boolean).join(', ');
+    const code = delivery.order_code ? '#' + escapeHtml(delivery.order_code) : 'Sem código';
+    const customer = escapeHtml(delivery.customer_name || 'Cliente');
+    return '<article class="delivery-card"><div class="delivery-order"><span>' + (index === 0 ? 'PRÓXIMA' : 'ENTREGA') + '</span><strong>' + code + '</strong></div><div class="delivery-info"><h3>' + customer + '</h3><p>' + escapeHtml(address || 'Endereço não informado') + '</p><small>Status: ' + escapeHtml(delivery.status.replaceAll('_',' ')) + '</small></div><button class="complete-delivery" data-complete-delivery="' + delivery.id + '">✓ Concluir entrega</button></article>';
+  }).join('');
+  list.querySelectorAll('[data-complete-delivery]').forEach(btn => btn.addEventListener('click', () => completeDelivery(btn.dataset.completeDelivery, btn)));
+}
+
+async function completeDelivery(deliveryId, button) {
+  if (!deliveryId || !state.user?.id) return;
+  if (!confirm('Confirmar que esta entrega foi concluída?')) return;
+  button.disabled = true; button.textContent = 'Concluindo...';
+  const now = new Date().toISOString();
+  const { error } = await supabase.from('deliveries').update({ status:'entregue', completed_at: now }).eq('id', deliveryId).eq('driver_id', state.user.id);
+  if (error) { button.disabled = false; button.textContent = '✓ Concluir entrega'; alert('Não foi possível concluir esta entrega.'); return; }
+  await supabase.from('delivery_events').insert({ delivery_id: deliveryId, driver_id: state.user.id, event_type: 'entrega_concluida', payload: { completed_at: now } });
+  await loadDriverDashboard();
+}
+
+async function loadAdminDashboard() {
+  const dayIso = startOfDay().toISOString();
+  const monthIso = startOfMonth().toISOString();
+  const [{ data: drivers = [] }, { data: today = [] }, { data: monthCompleted = [] }] = await Promise.all([
+    supabase.from('delivery_drivers').select('user_id,full_name,active').eq('active',true).order('full_name'),
+    supabase.from('deliveries').select('id,status,driver_id,created_at,completed_at').gte('created_at',dayIso),
+    supabase.from('deliveries').select('driver_id,completed_at').eq('status','entregue').gte('completed_at',monthIso)
+  ]);
+  document.querySelector('#admin-drivers').textContent = drivers.length;
+  document.querySelector('#admin-total').textContent = today.length;
+  document.querySelector('#admin-completed').textContent = today.filter(d => d.status === 'entregue').length;
+  document.querySelector('#admin-waiting').textContent = today.filter(d => !['entregue','cancelada'].includes(d.status)).length;
+  document.querySelector('#admin-driver-label').textContent = drivers.length + ' ativos';
+  const holder = document.querySelector('#admin-driver-stats');
+  if (!holder) return;
+  if (!drivers.length) { holder.innerHTML = '<p class="empty-state">Nenhum entregador cadastrado ainda.</p>'; return; }
+  holder.innerHTML = drivers.map(driver => {
+    const perf = countPerformance(monthCompleted.filter(d => d.driver_id === driver.user_id));
+    return '<article class="driver-row performance-row"><div class="avatar">' + escapeHtml(driver.full_name?.[0] || '?') + '</div><div class="driver-performance"><strong>' + escapeHtml(driver.full_name || 'Entregador') + '</strong><div class="driver-stats"><span><b>' + perf.today + '</b> hoje</span><span><b>' + perf.week + '</b> semana</span><span><b>' + perf.month + '</b> mês</span></div></div><button title="Ver entregador">›</button></article>';
+  }).join('');
 }
 
 function driverRow(name, detail, status, ago) {
