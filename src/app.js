@@ -117,9 +117,7 @@ function driverView() {
       <section class="map-card"><div id="map"></div><div class="map-float"><strong>Rota inteligente</strong><span>Mapa-base pronto para receber trânsito e otimização.</span></div></section>
       <section class="driver-sheet">
         <div class="metrics compact performance-metrics"><article><span>Hoje</span><strong id="driver-today">0</strong><small>concluídas</small></article><article><span>Semana</span><strong id="driver-week">0</strong><small>concluídas</small></article><article><span>Mês</span><strong id="driver-month">0</strong><small>concluídas</small></article></div>
-        <h2>Adicionar entrega</h2>
-        <div class="quick-actions"><button>${icon('camera')}<span>Foto</span></button><button>${icon('keyboard')}<span>Manual</span></button><button>${icon('box')}<span>Pedidos</span></button></div>
-        <div class="delivery-section"><div class="section-heading"><div><p class="eyebrow">MINHAS ENTREGAS</p><h2>Pendentes</h2></div><span id="driver-pending-count">0</span></div><div id="driver-deliveries" class="delivery-list"><p class="empty-state">Carregando entregas...</p></div></div>
+        <div class="delivery-section driver-delivery-section"><div class="section-heading"><div><p class="eyebrow">MINHAS ENTREGAS</p><h2>Pendentes</h2></div><span id="driver-pending-count">0</span></div><div id="driver-deliveries" class="delivery-list"><p class="empty-state">Carregando entregas...</p></div></div>
       </section>
     </main>
   `, 'driver');
