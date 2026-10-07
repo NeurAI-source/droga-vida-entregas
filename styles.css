@@ -497,3 +497,10 @@ body{background:var(--bg);color:var(--ink)}
   .history-row{grid-template-columns:1fr}
   #history-list,#user-manager{min-width:0}
 }
+
+.address-preview{width:100%;margin-top:-4px}
+.modal-card:has(#history-list){width:min(980px,96vw)}
+.modal-card:has(#user-manager){width:min(760px,96vw)}
+@media(max-width:900px){
+  .modal-card:has(#history-list),.modal-card:has(#user-manager){width:100%}
+}
