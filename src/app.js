@@ -111,8 +111,8 @@ function driverView() {
         <h2>Adicionar entrega</h2>
         <div class="quick-actions"><button>${icon('camera')}<span>Foto</span></button><button>${icon('keyboard')}<span>Manual</span></button><button>${icon('box')}<span>Pedidos</span></button></div>
         <div class="next-stop"><div><p class="eyebrow">PRÓXIMA ENTREGA</p><h3>Pedido #1058</h3><p>Rua exemplo, 885 · São José do Rio Preto</p></div><div class="eta"><strong>8 min</strong><span>3,2 km</span></div></div>
-        <button class="primary big" id="share-location">${icon('map')} Iniciar localização ao vivo</button>
-        <p style="font-size:11px;color:#9fb1a7;line-height:1.45">Sua localização só é compartilhada enquanto este botão estiver ativo.</p>
+        <button class="primary big" id="share-location">${icon('route')} Iniciar rota</button>
+        <p style="font-size:11px;color:#9fb1a7;line-height:1.45">Durante a rota, sua localização é usada para navegação e acompanhamento das entregas.</p>
       </section>
     </main>
   `, 'driver');
@@ -178,12 +178,12 @@ async function toggleLocationSharing() {
     if (supabase && state.user?.id) {
       await supabase.from('driver_locations').update({ sharing: false, updated_at: new Date().toISOString() }).eq('driver_id', state.user.id);
     }
-    if (btn) btn.textContent = '⌖ Iniciar localização ao vivo';
+    if (btn) btn.textContent = '↗ Iniciar rota';
     return;
   }
   if (!navigator.geolocation) return alert('Este aparelho não oferece geolocalização.');
   if (!supabase) return alert('O rastreamento real funciona após conectar o Supabase.');
-  if (btn) btn.textContent = '■ Parar localização ao vivo';
+  if (btn) btn.textContent = '■ Encerrar rota';
   state.watchId = navigator.geolocation.watchPosition(async position => {
     const c = position.coords;
     setLiveMarker(state.user.id, c.latitude, c.longitude, 'Você', true);
@@ -200,7 +200,7 @@ async function toggleLocationSharing() {
     }, { onConflict: 'driver_id' });
   }, () => {
     state.watchId = null;
-    if (btn) btn.textContent = '⌖ Iniciar localização ao vivo';
+    if (btn) btn.textContent = '↗ Iniciar rota';
     alert('Permita o acesso à localização para usar o rastreamento.');
   }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
 }
