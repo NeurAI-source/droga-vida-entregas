@@ -26,3 +26,22 @@
 .role-card{width:min(520px,100%);border:1px solid var(--line);background:#0b2016;border-radius:26px;padding:30px;box-shadow:0 30px 90px #0008;text-align:center}
 .role-card .brand-mark{margin:0 auto 14px}.role-card h2{margin:4px 0 8px;font-size:26px}.role-card .muted{margin:0 0 20px}
 .role-options{display:grid;gap:10px;margin:18px 0}.role-option{display:grid;gap:4px;text-align:left;border:1px solid var(--line);background:#102a1d;color:white;border-radius:16px;padding:15px 16px;cursor:pointer}.role-option:hover{border-color:var(--yellow);transform:translateY(-1px)}.role-option strong{font-size:14px}.role-option span{font-size:11px;color:var(--muted)}.role-logout{width:100%}
+
+/* Evita seleção acidental de textos e destaque de toque na interface mobile */
+html, body, #app, .app-shell, .topbar, .driver-layout, .driver-sheet, .map-card,
+.metrics, .delivery-section, .delivery-card, .queue-panel, .queue-row, .sidebar,
+.seller-main, .seller-hero, .seller-metrics, .drivers-panel, .role-page, .role-card {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+button, a, .role-option, .quick-actions button, .complete-delivery {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input, textarea, select, [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
