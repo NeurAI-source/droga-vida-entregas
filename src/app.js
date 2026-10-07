@@ -33,7 +33,7 @@ function loginView(message='') {
           <label>Senha<input required type="password" name="password" placeholder="••••••••"></label>
           <button class="primary" type="submit">Entrar</button>
         </form>
-        ${state.demo ? `<div class="demo-box"><strong>Modo demonstração</strong><span>Supabase ainda não conectado nesta base.</span><div><button data-demo="admin">Abrir como Admin</button><button data-demo="entregador">Abrir como Entregador</button></div></div>` : ''}
+        ${state.demo ? `<div class="demo-box"><strong>Modo demonstração</strong><span>Supabase ainda não conectado nesta base.</span><div><button data-demo="admin">Abrir como Admin</button><button data-demo="vendedor">Abrir como Vendedor</button><button data-demo="entregador">Abrir como Entregador</button></div></div>` : ''}
       </section>
     </main>
   `);
@@ -48,7 +48,7 @@ function loginView(message='') {
   });
 
   document.querySelectorAll('[data-demo]').forEach(btn => btn.addEventListener('click', () => {
-    state.profile = { full_name: btn.dataset.demo === 'admin' ? 'Administrador' : 'João Entregador', role: btn.dataset.demo };
+    state.profile = { full_name: btn.dataset.demo === 'admin' ? 'Administrador' : (btn.dataset.demo === 'vendedor' ? 'Vendedor' : 'João Entregador'), role: btn.dataset.demo };
     routeByRole();
   }));
 }
@@ -64,6 +64,17 @@ async function loadProfile(user) {
 
   if (staff?.active && ['owner', 'admin'].includes(staff.role)) {
     state.profile = { id: user.id, full_name: 'Administrador', role: 'admin', active: true };
+    return routeByRole();
+  }
+
+  const { data: seller } = await supabase
+    .from('delivery_staff')
+    .select('user_id, full_name, role, active')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (seller?.active && seller.role === 'vendedor') {
+    state.profile = { id: seller.user_id, full_name: seller.full_name, role: 'vendedor', active: true };
     return routeByRole();
   }
 
@@ -115,6 +126,31 @@ function driverView() {
   document.querySelector('#logout').addEventListener('click', logout);
   initMap('driver');
   if (!state.demo) loadDriverDashboard();
+}
+
+
+function sellerView() {
+  app.innerHTML = shell(`
+    ${topbar('Envio de entregas', `Olá, ${state.profile?.full_name || 'Vendedor'}`)}
+    <main class="seller-main">
+      <section class="seller-hero">
+        <div><p class="eyebrow">VENDEDOR</p><h2>Monte a entrega e envie para o entregador</h2><p>Cadastre o cliente, endereço e escolha quem vai levar.</p></div>
+        <button class="primary inline" id="seller-new-delivery">+ Nova entrega</button>
+      </section>
+      <section class="seller-metrics">
+        <article><span>Enviadas hoje</span><strong id="seller-total">0</strong></article>
+        <article><span>Em aberto</span><strong id="seller-open">0</strong></article>
+        <article><span>Concluídas</span><strong id="seller-done">0</strong></article>
+      </section>
+      <section class="queue-panel seller-queue">
+        <div class="panel-title"><div><p class="eyebrow">MEUS ENVIOS</p><h2>Entregas de hoje</h2></div><span id="seller-queue-count">0</span></div>
+        <div id="seller-delivery-queue" class="queue-list"><p class="empty-state">Carregando...</p></div>
+      </section>
+    </main>
+  `, 'seller');
+  document.querySelector('#logout').addEventListener('click', logout);
+  document.querySelector('#seller-new-delivery').addEventListener('click', openNewDeliveryModal);
+  if (!state.demo) loadSellerDashboard();
 }
 
 function adminView() {
@@ -200,7 +236,8 @@ async function openNewDeliveryModal() {
       return;
     }
     modal.remove();
-    await loadAdminDashboard();
+    if (state.profile?.role === 'admin') await loadAdminDashboard();
+    else if (state.profile?.role === 'vendedor') await loadSellerDashboard();
   });
 }
 
@@ -210,7 +247,43 @@ async function assignDelivery(deliveryId, driverId) {
     .update({ driver_id: assigned, status: assigned ? 'atribuida' : 'aguardando' })
     .eq('id', deliveryId);
   if (error) return alert('Não foi possível alterar o entregador.');
-  await loadAdminDashboard();
+  if (state.profile?.role === 'admin') await loadAdminDashboard();
+  else if (state.profile?.role === 'vendedor') await loadSellerDashboard();
+}
+
+
+function renderSellerQueue(queue, drivers) {
+  const holder = document.querySelector('#seller-delivery-queue');
+  const count = document.querySelector('#seller-queue-count');
+  if (!holder || !count) return;
+  count.textContent = queue.length;
+  if (!queue.length) {
+    holder.innerHTML = '<div class="empty-state success-empty">Nenhuma entrega enviada hoje ainda.</div>';
+    return;
+  }
+  holder.innerHTML = queue.map(item => {
+    const isClosed = ['entregue','cancelada'].includes(item.status);
+    const options = ['<option value="">Sem entregador</option>'].concat(drivers.map(d => '<option value="' + d.user_id + '"' + (item.driver_id === d.user_id ? ' selected' : '') + '>' + escapeHtml(d.full_name) + '</option>')).join('');
+    const code = item.order_code ? '#' + escapeHtml(item.order_code) : 'Sem código';
+    const driverSelect = isClosed
+      ? '<span class="closed-status">' + escapeHtml(item.status.replaceAll('_',' ')) + '</span>'
+      : '<select class="queue-driver" data-seller-assign="' + item.id + '">' + options + '</select>';
+    return '<article class="queue-row"><div class="queue-code"><span>Pedido</span><strong>' + code + '</strong></div><div class="queue-main"><strong>' + escapeHtml(item.customer_name || 'Cliente') + '</strong><span>' + escapeHtml(item.address_text || 'Endereço não informado') + '</span><small>' + escapeHtml(item.status.replaceAll('_',' ')) + '</small></div>' + driverSelect + '</article>';
+  }).join('');
+  holder.querySelectorAll('[data-seller-assign]').forEach(select => select.addEventListener('change', () => assignDelivery(select.dataset.sellerAssign, select.value)));
+}
+
+async function loadSellerDashboard() {
+  const dayIso = startOfDay().toISOString();
+  const [{ data: drivers = [] }, { data: deliveries = [] }] = await Promise.all([
+    supabase.from('delivery_drivers').select('user_id,full_name,active').eq('active',true).order('full_name'),
+    supabase.from('deliveries').select('id,order_code,customer_name,address_text,driver_id,status,created_at,completed_at').gte('created_at',dayIso).order('created_at',{ascending:false})
+  ]);
+  document.querySelector('#seller-total').textContent = deliveries.length;
+  document.querySelector('#seller-open').textContent = deliveries.filter(d => !['entregue','cancelada'].includes(d.status)).length;
+  document.querySelector('#seller-done').textContent = deliveries.filter(d => d.status === 'entregue').length;
+  renderSellerQueue(deliveries,drivers);
+  ensureDeliveryRealtime();
 }
 
 function renderQueue(queue, drivers) {
@@ -235,6 +308,7 @@ function ensureDeliveryRealtime() {
   state.channel = supabase.channel('delivery-operations')
     .on('postgres_changes', { event:'*', schema:'public', table:'deliveries' }, () => {
       if (state.profile?.role === 'admin') loadAdminDashboard();
+      else if (state.profile?.role === 'vendedor') loadSellerDashboard();
       else if (state.profile?.role === 'entregador') loadDriverDashboard();
     })
     .subscribe();
@@ -390,7 +464,9 @@ async function loadAdminRealtime() {
 }
 
 function routeByRole() {
-  if (state.profile?.role === 'admin') adminView(); else driverView();
+  if (state.profile?.role === 'admin') adminView();
+  else if (state.profile?.role === 'vendedor') sellerView();
+  else driverView();
 }
 
 async function boot() {
