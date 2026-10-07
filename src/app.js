@@ -393,12 +393,14 @@ async function loadAdminDashboard() {
   document.querySelector('#admin-waiting').textContent = today.filter(d => !['entregue','cancelada'].includes(d.status)).length;
   document.querySelector('#admin-driver-label').textContent = drivers.length + ' ativos';
   const holder = document.querySelector('#admin-driver-stats');
-  if (!holder) return;
-  if (!drivers.length) { holder.innerHTML = '<p class="empty-state">Nenhum entregador cadastrado ainda.</p>'; return; }
-  holder.innerHTML = drivers.map(driver => {
-    const perf = countPerformance(monthCompleted.filter(d => d.driver_id === driver.user_id));
-    return '<article class="driver-row performance-row"><div class="avatar">' + escapeHtml(driver.full_name?.[0] || '?') + '</div><div class="driver-performance"><strong>' + escapeHtml(driver.full_name || 'Entregador') + '</strong><div class="driver-stats"><span><b>' + perf.today + '</b> hoje</span><span><b>' + perf.week + '</b> semana</span><span><b>' + perf.month + '</b> mês</span></div></div><button title="Ver entregador">›</button></article>';
-  }).join('');
+  if (holder) {
+    holder.innerHTML = drivers.length
+      ? drivers.map(driver => {
+          const perf = countPerformance(monthCompleted.filter(d => d.driver_id === driver.user_id));
+          return '<article class="driver-row performance-row"><div class="avatar">' + escapeHtml(driver.full_name?.[0] || '?') + '</div><div class="driver-performance"><strong>' + escapeHtml(driver.full_name || 'Entregador') + '</strong><div class="driver-stats"><span><b>' + perf.today + '</b> hoje</span><span><b>' + perf.week + '</b> semana</span><span><b>' + perf.month + '</b> mês</span></div></div><button title="Ver entregador">›</button></article>';
+        }).join('')
+      : '<p class="empty-state">Nenhum entregador cadastrado ainda.</p>';
+  }
   renderQueue(queue, drivers);
   ensureDeliveryRealtime();
 }
