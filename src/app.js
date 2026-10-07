@@ -4,7 +4,7 @@ import { config } from './public-config.js';
 
 const app = document.querySelector('#app');
 const supabase = config.url && config.key ? createClient(config.url, config.key) : null;
-const state = { user: null, profile: null, map: null, markers: new Map(), channel: null, demo: !supabase };
+const state = { user: null, profile: null, map: null, markers: new Map(), channel: null, driverDeliveries: [], demo: !supabase };
 
 function icon(name) {
   const icons = {
@@ -140,12 +140,14 @@ function driverView() {
       </section>
       <section class="driver-sheet">
         <div class="metrics compact performance-metrics"><article><span>Hoje</span><strong id="driver-today">0</strong><small>concluídas</small></article><article><span>Semana</span><strong id="driver-week">0</strong><small>concluídas</small></article><article><span>Mês</span><strong id="driver-month">0</strong><small>concluídas</small></article></div>
+        <div class="driver-route-actions"><button class="secondary route-all-btn" id="open-all-route" type="button">↗ Abrir rota no Google Maps</button></div>
         <div class="delivery-section driver-delivery-section"><div class="section-heading"><div><p class="eyebrow">MINHAS ENTREGAS</p><h2>Pendentes</h2></div><span id="driver-pending-count">0</span></div><div id="driver-deliveries" class="delivery-list"><p class="empty-state">Carregando entregas...</p></div></div>
       </section>
     </main>
   `, 'driver');
   document.querySelector('#logout').addEventListener('click', logout);
   document.querySelector('#map-fullscreen').addEventListener('click', toggleDriverMapFullscreen);
+  document.querySelector('#open-all-route').addEventListener('click', openAllStopsRoute);
   initMap('driver');
   if (!state.demo) loadDriverDashboard();
 }
@@ -194,7 +196,7 @@ function adminView() {
     <aside class="sidebar"><div class="side-brand"><div class="brand-mark small">DV</div><div><strong>Entregas</strong><span>Central operacional</span></div></div><nav><button class="active">${icon('map')} Mapa ao vivo</button><button>${icon('box')} Entregas</button><button>${icon('users')} Entregadores</button><button>${icon('clock')} Histórico</button></nav><div class="side-user"><span>${icon('admin')}</span><div><strong>${state.profile?.full_name || 'Administrador'}</strong><small>Administrador</small></div></div></aside>
     <main class="admin-main">
       ${topbar('Operação de hoje', 'Acompanhe entregadores, rotas e pedidos em um só lugar.')}
-      <section class="admin-actions"><button class="primary inline" id="new-delivery">+ Nova entrega</button><button class="secondary" id="new-driver">+ Novo usuário</button></section>
+      <section class="admin-actions"><button class="primary inline" id="new-delivery">+ Nova entrega</button><button class="secondary" id="new-driver">+ Novo usuário</button><button class="secondary" id="manage-users">Gerenciar usuários</button><button class="secondary" id="open-history">Histórico</button></section>
       <section class="metrics"><article><span>Entregadores ativos</span><strong id="admin-drivers">0</strong><small>cadastrados</small></article><article><span>Entregas totais</span><strong id="admin-total">0</strong><small>hoje</small></article><article><span>Concluídas</span><strong id="admin-completed">0</strong><small>hoje</small></article><article><span>Aguardando</span><strong id="admin-waiting">0</strong><small>sem conclusão</small></article></section>
       <section class="ops-grid"><div class="map-card admin-map"><div id="map"></div><div class="map-legend"><span><i class="green"></i>Em rota</span><span><i class="yellow"></i>Parado</span><span><i class="gray"></i>Offline</span></div></div><aside class="drivers-panel"><div class="panel-title"><div><p class="eyebrow">DESEMPENHO</p><h2>Entregadores</h2></div><span id="admin-driver-label">0 ativos</span></div><div id="admin-driver-stats"><p class="empty-state">Carregando...</p></div></aside></section>
       <section class="queue-panel"><div class="panel-title"><div><p class="eyebrow">FILA</p><h2>Entregas em aberto</h2></div><span id="queue-count">0</span></div><div id="admin-delivery-queue" class="queue-list"><p class="empty-state">Carregando fila...</p></div></section>
@@ -203,6 +205,12 @@ function adminView() {
   document.querySelector('#logout').addEventListener('click', logout);
   document.querySelector('#new-delivery').addEventListener('click', openNewDeliveryModal);
   document.querySelector('#new-driver').addEventListener('click', openNewDriverModal);
+  document.querySelector('#manage-users').addEventListener('click', openUserManagerModal);
+  document.querySelector('#open-history').addEventListener('click', openHistoryModal);
+  const adminNav = document.querySelectorAll('.sidebar nav button');
+  if (adminNav[1]) adminNav[1].addEventListener('click', () => document.querySelector('.queue-panel')?.scrollIntoView({behavior:'smooth'}));
+  if (adminNav[2]) adminNav[2].addEventListener('click', openUserManagerModal);
+  if (adminNav[3]) adminNav[3].addEventListener('click', openHistoryModal);
   initMap('admin');
   if (!state.demo) loadAdminDashboard();
 }
@@ -354,6 +362,164 @@ function ensureDeliveryRealtime() {
       else if (state.profile?.role === 'entregador') loadDriverDashboard();
     })
     .subscribe();
+}
+
+
+function phoneDigits(value='') {
+  return String(value).replace(/\D/g,'');
+}
+
+function googleMapsDestination(address='') {
+  const full = /rio preto|são josé/i.test(address) ? address : address + ', São José do Rio Preto - SP';
+  return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(full) + '&travelmode=driving';
+}
+
+function openDeliveryMaps(delivery) {
+  const address = delivery?.address_text || [delivery?.street,delivery?.street_number,delivery?.neighborhood].filter(Boolean).join(', ');
+  if (!address) return alert('Esta entrega está sem endereço.');
+  window.open(googleMapsDestination(address),'_blank','noopener');
+}
+
+function openAllStopsRoute() {
+  const stops = state.driverDeliveries.filter(d => ['aceita','em_rota'].includes(d.status));
+  if (!stops.length) return alert('Aceite pelo menos uma entrega para abrir a rota.');
+  const addresses = stops.map(d => d.address_text || [d.street,d.street_number,d.neighborhood].filter(Boolean).join(', ')).filter(Boolean);
+  if (!addresses.length) return alert('As entregas estão sem endereço.');
+  if (addresses.length === 1) return window.open(googleMapsDestination(addresses[0]),'_blank','noopener');
+
+  const limited = addresses.slice(0,9);
+  const destination = limited[limited.length - 1];
+  const waypoints = limited.slice(0,-1);
+  let url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(destination + ', São José do Rio Preto - SP');
+  if (waypoints.length) url += '&waypoints=' + encodeURIComponent(waypoints.map(a => a + ', São José do Rio Preto - SP').join('|'));
+  window.open(url,'_blank','noopener');
+}
+
+function contactWhatsApp(delivery) {
+  const phone = phoneDigits(delivery?.customer_phone);
+  if (!phone) return alert('Cliente sem telefone cadastrado.');
+  const national = phone.startsWith('55') ? phone : '55' + phone;
+  window.open('https://wa.me/' + national,'_blank','noopener');
+}
+
+function callCustomer(delivery) {
+  const phone = phoneDigits(delivery?.customer_phone);
+  if (!phone) return alert('Cliente sem telefone cadastrado.');
+  window.location.href = 'tel:' + phone;
+}
+
+function formatDateTime(value) {
+  if (!value) return '—';
+  try { return new Date(value).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}); }
+  catch { return '—'; }
+}
+
+async function uploadDeliveryProof(deliveryId,file) {
+  if (!file) return null;
+  if (!['image/jpeg','image/png','image/webp'].includes(file.type)) throw new Error('Use uma foto JPG, PNG ou WEBP.');
+  if (file.size > 5 * 1024 * 1024) throw new Error('A foto deve ter no máximo 5 MB.');
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g,'');
+  const path = state.user.id + '/' + deliveryId + '/' + Date.now() + '.' + ext;
+  const { error } = await supabase.storage.from('delivery-proofs').upload(path,file,{upsert:false,contentType:file.type});
+  if (error) throw error;
+  return path;
+}
+
+async function openCompleteDeliveryModal(deliveryId) {
+  const modal = openModal('Concluir entrega','<form id="complete-form" class="stack-form"><p class="form-help">Confirme a entrega. A foto é opcional e fica privada para a operação.</p><label>Foto do comprovante (opcional)<input name="proof" type="file" accept="image/jpeg,image/png,image/webp" capture="environment"></label><button class="primary" type="submit">✓ Confirmar entrega</button></form>');
+  const form = modal.querySelector('#complete-form');
+  form.addEventListener('submit',async e => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled=true; btn.textContent='Concluindo...';
+    const file = form.elements.proof.files?.[0] || null;
+    try {
+      const proofPath = await uploadDeliveryProof(deliveryId,file);
+      const now = new Date().toISOString();
+      const update = { status:'entregue', completed_at:now, failure_reason:null };
+      if (proofPath) update.proof_photo_path = proofPath;
+      const { error } = await supabase.from('deliveries').update(update).eq('id',deliveryId).eq('driver_id',state.user.id);
+      if (error) throw error;
+      await supabase.from('delivery_events').insert({delivery_id:deliveryId,driver_id:state.user.id,event_type:'entrega_concluida',payload:{completed_at:now,proof:Boolean(proofPath)}});
+      modal.remove();
+      await loadDriverDashboard();
+    } catch (error) {
+      btn.disabled=false; btn.textContent='✓ Confirmar entrega';
+      alert(error?.message || 'Não foi possível concluir esta entrega.');
+    }
+  });
+}
+
+function openNotDeliveredModal(deliveryId) {
+  const modal = openModal('Não foi possível entregar','<form id="not-delivered-form" class="stack-form"><label>Motivo<select name="reason" required><option value="">Selecione...</option><option>Cliente ausente</option><option>Cliente não atendeu</option><option>Endereço incorreto</option><option>Cliente recusou</option><option>Problema com pagamento</option><option>Outro motivo</option></select></label><label>Observação<textarea name="note" rows="3" placeholder="Detalhes opcionais"></textarea></label><button class="danger-button" type="submit">Registrar não entrega</button></form>');
+  const form = modal.querySelector('#not-delivered-form');
+  form.addEventListener('submit',async e => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const reason = String(fd.get('reason') || '').trim();
+    const note = String(fd.get('note') || '').trim();
+    if (!reason) return;
+    const finalReason = note ? reason + ' — ' + note : reason;
+    const now = new Date().toISOString();
+    const { error } = await supabase.from('deliveries').update({status:'nao_entregue',completed_at:now,failure_reason:finalReason}).eq('id',deliveryId).eq('driver_id',state.user.id);
+    if (error) return alert('Não foi possível registrar.');
+    await supabase.from('delivery_events').insert({delivery_id:deliveryId,driver_id:state.user.id,event_type:'entrega_nao_realizada',payload:{completed_at:now,reason:finalReason}});
+    modal.remove();
+    await loadDriverDashboard();
+  });
+}
+
+async function openProof(path) {
+  if (!path) return;
+  const { data, error } = await supabase.storage.from('delivery-proofs').createSignedUrl(path,120);
+  if (error || !data?.signedUrl) return alert('Não foi possível abrir o comprovante.');
+  window.open(data.signedUrl,'_blank','noopener');
+}
+
+async function openUserManagerModal() {
+  const modal = openModal('Gerenciar usuários','<div id="user-manager"><p class="empty-state">Carregando usuários...</p></div>');
+  const holder = modal.querySelector('#user-manager');
+  const { data, error } = await supabase.functions.invoke('delivery-admin-create-driver',{body:{action:'list-users'}});
+  if (error || data?.error) {
+    holder.innerHTML='<p class="form-message">Não foi possível carregar os usuários.</p>';
+    return;
+  }
+  const users = data.users || [];
+  holder.innerHTML = users.length ? '<div class="user-manage-list">' + users.map(u => '<article class="user-manage-row"><div><strong>' + escapeHtml(u.full_name || u.email || 'Usuário') + '</strong><span>' + escapeHtml(u.email || '') + '</span><small>' + (u.role === 'vendedor' ? 'Vendedor' : 'Entregador') + ' · ' + (u.active ? 'Ativo' : 'Inativo') + '</small></div><div class="user-manage-actions"><button class="secondary mini" data-reset-user="' + u.user_id + '">Senha</button><button class="' + (u.active ? 'danger-outline' : 'activate-button') + '" data-toggle-user="' + u.user_id + '" data-role="' + u.role + '" data-active="' + (u.active ? '0':'1') + '">' + (u.active ? 'Desativar':'Ativar') + '</button></div></article>').join('') + '</div>' : '<p class="empty-state">Nenhum usuário cadastrado.</p>';
+
+  holder.querySelectorAll('[data-toggle-user]').forEach(btn => btn.addEventListener('click',async () => {
+    btn.disabled=true;
+    const { data:resp,error:err } = await supabase.functions.invoke('delivery-admin-create-driver',{body:{action:'toggle-user',user_id:btn.dataset.toggleUser,role:btn.dataset.role,active:btn.dataset.active==='1'}});
+    if (err || resp?.error) { btn.disabled=false; return alert(resp?.error || 'Não foi possível alterar.'); }
+    modal.remove(); await openUserManagerModal(); await loadAdminDashboard();
+  }));
+
+  holder.querySelectorAll('[data-reset-user]').forEach(btn => btn.addEventListener('click',() => openResetPasswordModal(btn.dataset.resetUser,modal)));
+}
+
+function openResetPasswordModal(userId,parentModal) {
+  const modal = openModal('Redefinir senha','<form id="reset-password-form" class="stack-form"><label>Nova senha<input name="password" type="password" minlength="8" required placeholder="Mínimo 8 caracteres"></label><button class="primary" type="submit">Salvar nova senha</button></form>');
+  const form = modal.querySelector('#reset-password-form');
+  form.addEventListener('submit',async e => {
+    e.preventDefault();
+    const password = String(new FormData(form).get('password') || '');
+    const { data,error } = await supabase.functions.invoke('delivery-admin-create-driver',{body:{action:'reset-password',user_id:userId,password}});
+    if (error || data?.error) return alert(data?.error || 'Não foi possível redefinir.');
+    modal.remove(); parentModal?.remove(); alert('Senha atualizada.');
+  });
+}
+
+async function openHistoryModal() {
+  const modal = openModal('Histórico de entregas','<div id="history-list"><p class="empty-state">Carregando histórico...</p></div>');
+  const holder = modal.querySelector('#history-list');
+  const [{data:rows=[],error},{data:drivers=[]}] = await Promise.all([
+    supabase.from('deliveries').select('id,order_code,customer_name,address_text,status,driver_id,created_at,accepted_at,completed_at,failure_reason,proof_photo_path').order('created_at',{ascending:false}).limit(150),
+    supabase.from('delivery_drivers').select('user_id,full_name')
+  ]);
+  if (error) { holder.innerHTML='<p class="form-message">Não foi possível carregar o histórico.</p>'; return; }
+  const names = new Map(drivers.map(d=>[d.user_id,d.full_name]));
+  holder.innerHTML = rows.length ? '<div class="history-list">' + rows.map(r => '<article class="history-row"><div class="history-main"><strong>' + (r.order_code ? '#' + escapeHtml(r.order_code) + ' · ' : '') + escapeHtml(r.customer_name || 'Cliente') + '</strong><span>' + escapeHtml(r.address_text || '') + '</span><small>' + escapeHtml(names.get(r.driver_id) || 'Sem entregador') + ' · ' + escapeHtml(deliveryStatusLabel(r.status)) + '</small></div><div class="history-times"><span>Criada: ' + formatDateTime(r.created_at) + '</span><span>Aceita: ' + formatDateTime(r.accepted_at) + '</span><span>Finalizada: ' + formatDateTime(r.completed_at) + '</span>' + (r.failure_reason ? '<em>' + escapeHtml(r.failure_reason) + '</em>' : '') + '</div>' + (r.proof_photo_path ? '<button class="secondary mini" data-proof="' + escapeHtml(r.proof_photo_path) + '">Ver foto</button>' : '') + '</article>').join('') + '</div>' : '<p class="empty-state">Ainda não há histórico.</p>';
+  holder.querySelectorAll('[data-proof]').forEach(btn => btn.addEventListener('click',() => openProof(btn.dataset.proof)));
 }
 
 function startOfDay(date = new Date()) {
