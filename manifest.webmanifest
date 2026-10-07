@@ -1,0 +1,11 @@
+{
+  "name": "Droga Vida Entregas",
+  "short_name": "DV Entregas",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#07170f",
+  "theme_color": "#07170f",
+  "icons": [
+    {"src":"./assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
