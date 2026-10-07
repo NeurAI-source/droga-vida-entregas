@@ -3,9 +3,14 @@
   "short_name": "DV Entregas",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#07170f",
-  "theme_color": "#07170f",
+  "background_color": "#ffffff",
+  "theme_color": "#e60012",
   "icons": [
-    {"src":"./assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+    {
+      "src": "./assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
   ]
 }
