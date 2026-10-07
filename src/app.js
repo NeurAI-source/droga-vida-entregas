@@ -122,13 +122,122 @@ function adminView() {
     <aside class="sidebar"><div class="side-brand"><div class="brand-mark small">DV</div><div><strong>Entregas</strong><span>Central operacional</span></div></div><nav><button class="active">${icon('map')} Mapa ao vivo</button><button>${icon('box')} Entregas</button><button>${icon('users')} Entregadores</button><button>${icon('clock')} Histórico</button></nav><div class="side-user"><span>${icon('admin')}</span><div><strong>${state.profile?.full_name || 'Administrador'}</strong><small>Administrador</small></div></div></aside>
     <main class="admin-main">
       ${topbar('Operação de hoje', 'Acompanhe entregadores, rotas e pedidos em um só lugar.')}
+      <section class="admin-actions"><button class="primary inline" id="new-delivery">+ Nova entrega</button><button class="secondary" id="new-driver">+ Novo entregador</button></section>
       <section class="metrics"><article><span>Entregadores ativos</span><strong id="admin-drivers">0</strong><small>cadastrados</small></article><article><span>Entregas totais</span><strong id="admin-total">0</strong><small>hoje</small></article><article><span>Concluídas</span><strong id="admin-completed">0</strong><small>hoje</small></article><article><span>Aguardando</span><strong id="admin-waiting">0</strong><small>sem conclusão</small></article></section>
       <section class="ops-grid"><div class="map-card admin-map"><div id="map"></div><div class="map-legend"><span><i class="green"></i>Em rota</span><span><i class="yellow"></i>Parado</span><span><i class="gray"></i>Offline</span></div></div><aside class="drivers-panel"><div class="panel-title"><div><p class="eyebrow">DESEMPENHO</p><h2>Entregadores</h2></div><span id="admin-driver-label">0 ativos</span></div><div id="admin-driver-stats"><p class="empty-state">Carregando...</p></div></aside></section>
+      <section class="queue-panel"><div class="panel-title"><div><p class="eyebrow">FILA</p><h2>Entregas em aberto</h2></div><span id="queue-count">0</span></div><div id="admin-delivery-queue" class="queue-list"><p class="empty-state">Carregando fila...</p></div></section>
     </main>
   `, 'admin');
   document.querySelector('#logout').addEventListener('click', logout);
+  document.querySelector('#new-delivery').addEventListener('click', openNewDeliveryModal);
+  document.querySelector('#new-driver').addEventListener('click', openNewDriverModal);
   initMap('admin');
   if (!state.demo) loadAdminDashboard();
+}
+
+
+function openModal(title, bodyHtml) {
+  document.querySelector('.modal-backdrop')?.remove();
+  const wrap = document.createElement('div');
+  wrap.className = 'modal-backdrop';
+  wrap.innerHTML = '<section class="modal-card"><div class="modal-head"><div><p class="eyebrow">DROGA VIDA ENTREGAS</p><h2>' + escapeHtml(title) + '</h2></div><button class="icon-btn" data-close-modal>×</button></div><div class="modal-body">' + bodyHtml + '</div></section>';
+  document.body.appendChild(wrap);
+  wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-close-modal]')) wrap.remove(); });
+  return wrap;
+}
+
+async function openNewDriverModal() {
+  const modal = openModal('Novo entregador', '<form id="driver-form" class="stack-form"><label>Nome completo<input name="full_name" required placeholder="Nome do entregador"></label><label>E-mail de acesso<input name="email" type="email" required placeholder="entregador@exemplo.com"></label><label>Telefone<input name="phone" placeholder="(17) 99999-9999"></label><label>Senha inicial<input name="password" type="password" minlength="8" required placeholder="Mínimo 8 caracteres"></label><button class="primary" type="submit">Criar entregador</button><p class="form-help">O entregador usará este e-mail e senha para entrar.</p></form>');
+  const form = modal.querySelector('#driver-form');
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    const fd = new FormData(form);
+    button.disabled = true; button.textContent = 'Criando...';
+    const { data, error } = await supabase.functions.invoke('delivery-admin-create-driver', {
+      body: {
+        full_name: fd.get('full_name'),
+        email: fd.get('email'),
+        phone: fd.get('phone'),
+        password: fd.get('password')
+      }
+    });
+    if (error || data?.error) {
+      button.disabled = false; button.textContent = 'Criar entregador';
+      alert(data?.error || 'Não foi possível criar o entregador.');
+      return;
+    }
+    modal.remove();
+    await loadAdminDashboard();
+    alert('Entregador criado com sucesso.');
+  });
+}
+
+async function openNewDeliveryModal() {
+  const { data: drivers = [] } = await supabase.from('delivery_drivers').select('user_id,full_name').eq('active',true).order('full_name');
+  const options = ['<option value="">Aguardando entregador</option>'].concat(drivers.map(d => '<option value="' + d.user_id + '">' + escapeHtml(d.full_name) + '</option>')).join('');
+  const modal = openModal('Nova entrega', '<form id="delivery-form" class="stack-form"><div class="form-grid"><label>Código do pedido<input name="order_code" placeholder="Ex.: 1058"></label><label>Cliente<input name="customer_name" required placeholder="Nome do cliente"></label></div><label>Telefone<input name="customer_phone" placeholder="(17) 99999-9999"></label><label>Endereço completo<input name="address_text" required placeholder="Rua, número, bairro"></label><label>Entregador<select name="driver_id">' + options + '</select></label><label>Observação<textarea name="notes" rows="3" placeholder="Referência, troco, observação..."></textarea></label><button class="primary" type="submit">Adicionar à fila</button></form>');
+  const form = modal.querySelector('#delivery-form');
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    const fd = new FormData(form);
+    const driverId = String(fd.get('driver_id') || '') || null;
+    button.disabled = true; button.textContent = 'Salvando...';
+    const { error } = await supabase.from('deliveries').insert({
+      order_code: String(fd.get('order_code') || '').trim() || null,
+      customer_name: String(fd.get('customer_name') || '').trim(),
+      customer_phone: String(fd.get('customer_phone') || '').trim() || null,
+      address_text: String(fd.get('address_text') || '').trim(),
+      driver_id: driverId,
+      status: driverId ? 'atribuida' : 'aguardando',
+      notes: String(fd.get('notes') || '').trim() || null,
+      created_by: state.user.id
+    });
+    if (error) {
+      button.disabled = false; button.textContent = 'Adicionar à fila';
+      alert('Não foi possível cadastrar a entrega.');
+      return;
+    }
+    modal.remove();
+    await loadAdminDashboard();
+  });
+}
+
+async function assignDelivery(deliveryId, driverId) {
+  const assigned = driverId || null;
+  const { error } = await supabase.from('deliveries')
+    .update({ driver_id: assigned, status: assigned ? 'atribuida' : 'aguardando' })
+    .eq('id', deliveryId);
+  if (error) return alert('Não foi possível alterar o entregador.');
+  await loadAdminDashboard();
+}
+
+function renderQueue(queue, drivers) {
+  const holder = document.querySelector('#admin-delivery-queue');
+  const count = document.querySelector('#queue-count');
+  if (!holder || !count) return;
+  count.textContent = queue.length;
+  if (!queue.length) {
+    holder.innerHTML = '<div class="empty-state success-empty">✓ Nenhuma entrega em aberto.</div>';
+    return;
+  }
+  holder.innerHTML = queue.map(item => {
+    const options = ['<option value="">Sem entregador</option>'].concat(drivers.map(d => '<option value="' + d.user_id + '"' + (item.driver_id === d.user_id ? ' selected' : '') + '>' + escapeHtml(d.full_name) + '</option>')).join('');
+    const code = item.order_code ? '#' + escapeHtml(item.order_code) : 'Sem código';
+    return '<article class="queue-row"><div class="queue-code"><span>Pedido</span><strong>' + code + '</strong></div><div class="queue-main"><strong>' + escapeHtml(item.customer_name || 'Cliente') + '</strong><span>' + escapeHtml(item.address_text || 'Endereço não informado') + '</span><small>' + escapeHtml(item.status.replaceAll('_',' ')) + '</small></div><select class="queue-driver" data-assign="' + item.id + '">' + options + '</select></article>';
+  }).join('');
+  holder.querySelectorAll('[data-assign]').forEach(select => select.addEventListener('change', () => assignDelivery(select.dataset.assign, select.value)));
+}
+
+function ensureDeliveryRealtime() {
+  if (state.channel || !supabase) return;
+  state.channel = supabase.channel('delivery-operations')
+    .on('postgres_changes', { event:'*', schema:'public', table:'deliveries' }, () => {
+      if (state.profile?.role === 'admin') loadAdminDashboard();
+      else if (state.profile?.role === 'entregador') loadDriverDashboard();
+    })
+    .subscribe();
 }
 
 function startOfDay(date = new Date()) {
@@ -177,6 +286,7 @@ async function loadDriverDashboard() {
     return '<article class="delivery-card"><div class="delivery-order"><span>' + (index === 0 ? 'PRÓXIMA' : 'ENTREGA') + '</span><strong>' + code + '</strong></div><div class="delivery-info"><h3>' + customer + '</h3><p>' + escapeHtml(address || 'Endereço não informado') + '</p><small>Status: ' + escapeHtml(delivery.status.replaceAll('_',' ')) + '</small></div><button class="complete-delivery" data-complete-delivery="' + delivery.id + '">✓ Concluir entrega</button></article>';
   }).join('');
   list.querySelectorAll('[data-complete-delivery]').forEach(btn => btn.addEventListener('click', () => completeDelivery(btn.dataset.completeDelivery, btn)));
+  ensureDeliveryRealtime();
 }
 
 async function completeDelivery(deliveryId, button) {
@@ -193,10 +303,11 @@ async function completeDelivery(deliveryId, button) {
 async function loadAdminDashboard() {
   const dayIso = startOfDay().toISOString();
   const statsIso = new Date(Math.min(startOfWeek().getTime(), startOfMonth().getTime())).toISOString();
-  const [{ data: drivers = [] }, { data: today = [] }, { data: monthCompleted = [] }] = await Promise.all([
+  const [{ data: drivers = [] }, { data: today = [] }, { data: monthCompleted = [] }, { data: queue = [] }] = await Promise.all([
     supabase.from('delivery_drivers').select('user_id,full_name,active').eq('active',true).order('full_name'),
     supabase.from('deliveries').select('id,status,driver_id,created_at,completed_at').gte('created_at',dayIso),
-    supabase.from('deliveries').select('driver_id,completed_at').eq('status','entregue').gte('completed_at',statsIso)
+    supabase.from('deliveries').select('driver_id,completed_at').eq('status','entregue').gte('completed_at',statsIso),
+    supabase.from('deliveries').select('id,order_code,customer_name,address_text,driver_id,status,created_at').neq('status','entregue').neq('status','cancelada').order('created_at',{ascending:false}).limit(100)
   ]);
   document.querySelector('#admin-drivers').textContent = drivers.length;
   document.querySelector('#admin-total').textContent = today.length;
@@ -210,6 +321,8 @@ async function loadAdminDashboard() {
     const perf = countPerformance(monthCompleted.filter(d => d.driver_id === driver.user_id));
     return '<article class="driver-row performance-row"><div class="avatar">' + escapeHtml(driver.full_name?.[0] || '?') + '</div><div class="driver-performance"><strong>' + escapeHtml(driver.full_name || 'Entregador') + '</strong><div class="driver-stats"><span><b>' + perf.today + '</b> hoje</span><span><b>' + perf.week + '</b> semana</span><span><b>' + perf.month + '</b> mês</span></div></div><button title="Ver entregador">›</button></article>';
   }).join('');
+  renderQueue(queue, drivers);
+  ensureDeliveryRealtime();
 }
 
 function driverRow(name, detail, status, ago) {
