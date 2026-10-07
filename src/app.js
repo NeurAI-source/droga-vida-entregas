@@ -133,7 +133,11 @@ function driverView() {
   app.innerHTML = shell(`
     ${topbar('Minha rota', `Olá, ${state.profile?.full_name || 'Entregador'}`)}
     <main class="driver-layout">
-      <section class="map-card"><div id="map"></div><div class="map-float"><strong>Rota inteligente</strong><span>Mapa-base pronto para receber trânsito e otimização.</span></div></section>
+      <section class="map-card driver-map-card">
+        <div id="map"></div>
+        <div class="map-float"><strong>Rota inteligente</strong><span>Mapa-base pronto para receber trânsito e otimização.</span></div>
+        <button class="map-fullscreen-btn" id="map-fullscreen" type="button">⛶ Tela cheia</button>
+      </section>
       <section class="driver-sheet">
         <div class="metrics compact performance-metrics"><article><span>Hoje</span><strong id="driver-today">0</strong><small>concluídas</small></article><article><span>Semana</span><strong id="driver-week">0</strong><small>concluídas</small></article><article><span>Mês</span><strong id="driver-month">0</strong><small>concluídas</small></article></div>
         <div class="delivery-section driver-delivery-section"><div class="section-heading"><div><p class="eyebrow">MINHAS ENTREGAS</p><h2>Pendentes</h2></div><span id="driver-pending-count">0</span></div><div id="driver-deliveries" class="delivery-list"><p class="empty-state">Carregando entregas...</p></div></div>
@@ -141,10 +145,25 @@ function driverView() {
     </main>
   `, 'driver');
   document.querySelector('#logout').addEventListener('click', logout);
+  document.querySelector('#map-fullscreen').addEventListener('click', toggleDriverMapFullscreen);
   initMap('driver');
   if (!state.demo) loadDriverDashboard();
 }
 
+
+function toggleDriverMapFullscreen() {
+  const card = document.querySelector('.driver-map-card');
+  const button = document.querySelector('#map-fullscreen');
+  if (!card || !button) return;
+
+  const active = card.classList.toggle('is-fullscreen');
+  document.body.classList.toggle('map-fullscreen-open', active);
+  button.textContent = active ? '× Voltar' : '⛶ Tela cheia';
+
+  setTimeout(() => {
+    if (state.map) state.map.invalidateSize();
+  }, 120);
+}
 
 function sellerView() {
   app.innerHTML = shell(`
