@@ -140,6 +140,7 @@ function driverView() {
       <section class="map-card driver-map-card">
         <div id="map"></div>
         <div class="map-float"><strong>Rota inteligente</strong><span>Mapa-base pronto para receber trânsito e otimização.</span></div>
+        <div class="traffic-legend" id="traffic-legend" hidden><span><i class="traffic-green"></i>Livre</span><span><i class="traffic-orange"></i>Moderado</span><span><i class="traffic-red"></i>Lento</span><span><i class="traffic-darkred"></i>Muito lento</span></div>
         <button class="map-fullscreen-btn" id="map-fullscreen" type="button">⛶ Tela cheia</button>
       </section>
       <section class="driver-sheet">
@@ -720,6 +721,8 @@ function initLeafletMap(mode) {
 
   const float = document.querySelector('.map-float');
   if (float) float.innerHTML = '<strong>Mapa de entregas</strong><span>Google Maps será ativado quando a chave estiver configurada.</span>';
+  const legend = document.querySelector('#traffic-legend');
+  if (legend) legend.hidden = true;
 
   if (!state.demo) return;
   const points = mode === 'admin'
@@ -752,6 +755,8 @@ async function initGoogleMap(mode) {
 
   const float = document.querySelector('.map-float');
   if (float) float.innerHTML = '<strong>Trânsito em tempo real</strong><span>Google Maps · vias atualizadas automaticamente</span>';
+  const legend = document.querySelector('#traffic-legend');
+  if (legend) legend.hidden = false;
 
   if (!state.demo) return;
   const points = mode === 'admin'
