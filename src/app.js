@@ -4,7 +4,7 @@ import { config } from './public-config.js';
 
 const app = document.querySelector('#app');
 const supabase = config.url && config.key ? createClient(config.url, config.key) : null;
-const state = { user: null, profile: null, map: null, markers: new Map(), channel: null, driverDeliveries: [], demo: !supabase };
+const state = { user: null, profile: null, map: null, mapProvider: 'leaflet', trafficLayer: null, markers: new Map(), channel: null, driverDeliveries: [], demo: !supabase };
 
 function icon(name) {
   const icons = {
@@ -120,7 +120,11 @@ async function logout() {
   }
   if (supabase) await supabase.auth.signOut();
   state.user = null; state.profile = null;
-  if (state.map) { state.map.remove(); state.map = null; }
+  if (state.map) {
+    if (state.mapProvider === 'leaflet' && typeof state.map.remove === 'function') state.map.remove();
+    state.map = null;
+  }
+  state.trafficLayer = null;
   state.markers.clear();
   loginView();
 }
@@ -163,7 +167,9 @@ function toggleDriverMapFullscreen() {
   button.textContent = active ? '× Voltar' : '⛶ Tela cheia';
 
   setTimeout(() => {
-    if (state.map) state.map.invalidateSize();
+    if (!state.map) return;
+    if (state.mapProvider === 'leaflet' && typeof state.map.invalidateSize === 'function') state.map.invalidateSize();
+    else if (window.google?.maps?.event) window.google.maps.event.trigger(state.map,'resize');
   }, 120);
 }
 
@@ -682,37 +688,126 @@ function driverRow(name, detail, status, ago) {
   return `<article class="driver-row"><div class="avatar">${name[0]}</div><div><strong>${name}</strong><span>${detail}</span><small><i></i>${status} · atualizado há ${ago}</small></div><button>›</button></article>`;
 }
 
-function initMap(mode) {
-  if (state.map) state.map.remove();
-  state.markers.clear();
-  const center = [-20.8113, -49.3758];
-  state.map = L.map('map', { zoomControl: false }).setView(center, 13);
-  L.control.zoom({ position: 'bottomright' }).addTo(state.map);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap', maxZoom: 19 }).addTo(state.map);
+let googleMapsLoader = null;
+
+function loadGoogleMaps() {
+  if (!config.googleMapsKey) return Promise.reject(new Error('Google Maps não configurado'));
+  if (window.google?.maps) return Promise.resolve(window.google.maps);
+  if (googleMapsLoader) return googleMapsLoader;
+
+  googleMapsLoader = new Promise((resolve,reject) => {
+    const callback = '__drogaVidaGoogleMapsReady';
+    window[callback] = () => {
+      resolve(window.google.maps);
+      delete window[callback];
+    };
+    const script = document.createElement('script');
+    script.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(config.googleMapsKey) + '&callback=' + callback + '&v=weekly&loading=async&language=pt-BR&region=BR';
+    script.async = true;
+    script.onerror = () => reject(new Error('Falha ao carregar Google Maps'));
+    document.head.appendChild(script);
+  });
+  return googleMapsLoader;
+}
+
+function initLeafletMap(mode) {
+  state.mapProvider = 'leaflet';
+  state.trafficLayer = null;
+  const center = [-20.8113,-49.3758];
+  state.map = L.map('map',{zoomControl:false}).setView(center,13);
+  L.control.zoom({position:'bottomright'}).addTo(state.map);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OpenStreetMap',maxZoom:19}).addTo(state.map);
+
+  const float = document.querySelector('.map-float');
+  if (float) float.innerHTML = '<strong>Mapa de entregas</strong><span>Google Maps será ativado quando a chave estiver configurada.</span>';
+
   if (!state.demo) return;
   const points = mode === 'admin'
     ? [[-20.807,-49.376,'João'],[-20.818,-49.365,'Marcos'],[-20.801,-49.389,'Pedro']]
     : [[-20.8113,-49.3758,'Você'],[-20.804,-49.369,'Próxima entrega']];
-  points.forEach(([lat,lng,label], idx) => {
-    const marker = L.circleMarker([lat,lng], { radius: idx ? 9 : 11, weight: 4, fillOpacity: 1 }).addTo(state.map);
-    marker.bindTooltip(label, { permanent: mode === 'admin', direction: 'top', offset: [0,-10] });
+  points.forEach(([lat,lng,label],idx) => {
+    const marker = L.circleMarker([lat,lng],{radius:idx?9:11,weight:4,fillOpacity:1}).addTo(state.map);
+    marker.bindTooltip(label,{permanent:mode==='admin',direction:'top',offset:[0,-10]});
   });
 }
 
+async function initGoogleMap(mode) {
+  const maps = await loadGoogleMaps();
+  state.mapProvider = 'google';
+  state.markers.clear();
 
+  state.map = new maps.Map(document.getElementById('map'),{
+    center:{lat:-20.8113,lng:-49.3758},
+    zoom:13,
+    mapTypeControl:true,
+    streetViewControl:false,
+    fullscreenControl:false,
+    zoomControl:true,
+    clickableIcons:true,
+    gestureHandling:'greedy'
+  });
+
+  state.trafficLayer = new maps.TrafficLayer({autoRefresh:true});
+  state.trafficLayer.setMap(state.map);
+
+  const float = document.querySelector('.map-float');
+  if (float) float.innerHTML = '<strong>Trânsito em tempo real</strong><span>Google Maps · vias atualizadas automaticamente</span>';
+
+  if (!state.demo) return;
+  const points = mode === 'admin'
+    ? [[-20.807,-49.376,'João'],[-20.818,-49.365,'Marcos'],[-20.801,-49.389,'Pedro']]
+    : [[-20.8113,-49.3758,'Você'],[-20.804,-49.369,'Próxima entrega']];
+  points.forEach(([lat,lng,label]) => {
+    new maps.Marker({position:{lat,lng},map:state.map,title:label});
+  });
+}
+
+async function initMap(mode) {
+  if (state.map && state.mapProvider === 'leaflet' && typeof state.map.remove === 'function') state.map.remove();
+  state.map = null;
+  state.trafficLayer = null;
+  state.markers.clear();
+
+  if (config.googleMapsKey) {
+    try {
+      await initGoogleMap(mode);
+      return;
+    } catch (error) {
+      console.warn('Google Maps indisponível; usando OpenStreetMap.',error);
+    }
+  }
+  initLeafletMap(mode);
+}
 function setLiveMarker(id, lat, lng, label, sharing = true) {
   if (!state.map || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
   let marker = state.markers.get(id);
+
+  if (state.mapProvider === 'google') {
+    if (!marker) {
+      marker = new google.maps.Marker({
+        position:{lat,lng},
+        map:state.map,
+        title:label || 'Entregador',
+        opacity:sharing ? 1 : .45
+      });
+      state.markers.set(id,marker);
+    } else {
+      marker.setPosition({lat,lng});
+      marker.setTitle(label || 'Entregador');
+      marker.setOpacity(sharing ? 1 : .45);
+    }
+    return;
+  }
+
   if (!marker) {
-    marker = L.circleMarker([lat,lng], { radius: 10, weight: 4, fillOpacity: 1 }).addTo(state.map);
-    state.markers.set(id, marker);
+    marker = L.circleMarker([lat,lng],{radius:10,weight:4,fillOpacity:1}).addTo(state.map);
+    state.markers.set(id,marker);
   } else {
     marker.setLatLng([lat,lng]);
   }
-  marker.setStyle({ opacity: sharing ? 1 : .45, fillOpacity: sharing ? 1 : .35 });
-  marker.bindTooltip(label || 'Entregador', { direction: 'top', offset: [0,-10] });
+  marker.setStyle({opacity:sharing?1:.45,fillOpacity:sharing?1:.35});
+  marker.bindTooltip(label || 'Entregador',{direction:'top',offset:[0,-10]});
 }
-
 function renderLiveDrivers(drivers, locations) {
   const names = new Map(drivers.map(d => [d.user_id, d.full_name]));
   const panel = document.querySelector('.drivers-panel');
